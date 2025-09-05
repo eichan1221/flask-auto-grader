@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>記述式 自動添削アプリ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <div class="container">
+
+    <div id="loading" class="loading hidden" aria-hidden="true">
+      <div class="spinner" role="progressbar" aria-label="処理中"></div>
+      <div class="loading-text">処理中です…</div>
+    </div>
+
+    <h1>✨ 記述式 自動添削アプリ ✨</h1>
+
+    <!-- ▼ ショート説明（常時表示） ▼ -->
+    <div class="intro">
+      <p>
+        中学生向けの記述式問題を自動で出題し、解答を入力すると
+        <strong>AIが採点・講評・模範解答</strong>を返します。<br>
+        宮城県公立高校入試や定期テストに対応したレベルで練習できます。
+      </p>
+      <details class="howto" aria-label="使い方を開閉">
+        <summary>使い方を見る</summary>
+        <div class="howto-body">
+          <ol>
+            <li><strong>出題モードを選ぶ</strong>：
+              <ul>
+                <li>手動プリセット（基本問題）</li>
+                <li>GPT自動生成（資料読解／用語説明／入試レベル／定期テスト）</li>
+                <li>用語説明（重要語）</li>
+              </ul>
+            </li>
+            <li><strong>教科・単元を選ぶ</strong>：
+              社会（地理／歴史／公民）または 理科（学年＋分野）</li>
+            <li><strong>🌟問題を出題</strong>：問題が表示されます。
+              自動生成問題はストックに保存（<strong>最大10件</strong>、古い順に自動削除）。</li>
+            <li><strong>解答を入力</strong>：30〜80字目安。文字数カウンターで確認可能。</li>
+            <li><strong>✉️添削を実行</strong>：点数・講評・模範解答・解説・出題意図・採点観点が返ります。</li>
+            <li><strong>ストックの活用</strong>：後から同じ問題に再挑戦／不要なら削除。</li>
+          </ol>
+          <p class="note">※ 資料読解問題は、外部画像なしで解けるように、問題文内の「資料A/B」に簡易データ（数値）を含めています。</p>
+        </div>
+      </details>
+    </div>
+    <!-- ▲ ショート説明＋詳細展開 ここまで ▲ -->
+
+    <form method="post" id="mainForm" autocomplete="off">
+      <div class="form-card">
+        <!-- 出題モード -->
+        <div class="form-group">
+          <label for="mode">出題モード</label>
+          <select id="mode" name="mode" onchange="this.form.submit()">
+            <option value="manual" {% if sel.mode == 'manual' %}selected{% endif %}>ストックから出題（手動プリセット）</option>
+            <option value="gpt" {% if sel.mode == 'gpt' %}selected{% endif %}>GPTで自動生成</option>
+            <option value="glossary" {% if sel.mode == 'glossary' %}selected{% endif %}>用語説明（重要語）</option>
+          </select>
+        </div>
+
+        <!-- 教科 -->
+        <div class="form-group">
+          <label for="subject">教科</label>
+          <select id="subject" name="subject" onchange="this.form.submit()">
+            <option value="社会" {% if sel.subject == '社会' %}selected{% endif %}>社会</option>
+            <option value="理科" {% if sel.subject == '理科' %}selected{% endif %}>理科</option>
+          </select>
+        </div>
+
+        <!-- 社会 -->
+        {% if sel.subject == '社会' %}
+        <div class="form-group">
+          <label for="field">分野（社会）</label>
+          <select id="field" name="field" onchange="this.form.submit()">
+            <option value="地理" {% if sel.field == '地理' %}selected{% endif %}>地理</option>
+            <option value="歴史" {% if sel.field == '歴史' %}selected{% endif %}>歴史</option>
+            <option value="公民" {% if sel.field == '公民' %}selected{% endif %}>公民</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="era">単元（{{ sel.field }}）</label>
+          <select id="era" name="era" onchange="this.form.submit()">
+            {% for unit in soc_units_map[sel.field] %}
+              <option value="{{ unit }}" {% if sel.era == unit %}selected{% endif %}>{{ unit }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- 理科 -->
+        {% elif sel.subject == '理科' %}
+        <div class="form-group">
+          <label for="grade">学年（理科）</label>
+          <select id="grade" name="grade" onchange="this.form.submit()">
+            <option value="中1" {% if sel.grade == '中1' %}selected{% endif %}>中1</option>
+            <option value="中2" {% if sel.grade == '中2' %}selected{% endif %}>中2</option>
+            <option value="中3" {% if sel.grade == '中3' %}selected{% endif %}>中3</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="genre">単元（理科）</label>
+          <select id="genre" name="genre" onchange="this.form.submit()">
+            <option value="生物" {% if sel.genre == '生物' %}selected{% endif %}>生物</option>
+            <option value="化学" {% if sel.genre == '化学' %}selected{% endif %}>化学</option>
+            <option value="物理" {% if sel.genre == '物理' %}selected{% endif %}>物理</option>
+            <option value="地学" {% if sel.genre == '地学' %}selected{% endif %}>地学</option>
+            {% if sel.grade == '中3' %}
+              <option value="天体" {% if sel.genre == '天体' %}selected{% endif %}>天体</option>
+            {% endif %}
+          </select>
+        </div>
+        {% endif %}
+
+        <!-- GPT自動生成用：出題タイプ -->
+        {% if sel.mode == 'gpt' %}
+        <div class="form-group">
+          <label for="qstyle">出題タイプ（GPT）</label>
+          <select id="qstyle" name="qstyle" onchange="this.form.submit()">
+            <option value="auto" {% if sel.qstyle == 'auto' %}selected{% endif %}>おまかせ（バランス）</option>
+            <option value="materials" {% if sel.qstyle == 'materials' %}selected{% endif %}>資料読解（ミニ表/数値付き）</option>
+            <option value="glossary" {% if sel.qstyle == 'glossary' %}selected{% endif %}>用語説明（重要語）</option>
+            <option value="exam" {% if sel.qstyle == 'exam' %}selected{% endif %}>入試レベルの記述（宮城県テイスト）</option>
+            <option value="school" {% if sel.qstyle == 'school' %}selected{% endif %}>定期テストの記述（教科書準拠）</option>
+          </select>
+        </div>
+        {% endif %}
+
+        <!-- 用語説明モード専用の用語選択（任意） -->
+        {% if sel.mode == 'glossary' %}
+          <div class="form-group">
+            <label for="term">用語（任意：指定しない場合はランダム）</label>
+            <select id="term" name="term">
+              <option value="">（指定しない）</option>
+              {% for t in term_list %}
+                <option value="{{ t }}">{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endif %}
+
+        <!-- 出題ボタン -->
+        <button type="submit" name="action" value="generate" formaction="/?action=generate" formnovalidate>🌟 問題を出題</button>
+
+        <!-- 問題と解答 -->
+        {% if question %}
+          {% if question.startswith('（エラー）') %}
+          <div class="result-box error-box"><p>{{ question }}</p></div>
+          {% else %}
+          <div class="form-group">
+            <label for="question">問題</label>
+            <textarea id="question" name="question" readonly>{{ question }}</textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="input_answer">解答を入力（30〜80字 推奨）</label>
+            <textarea id="input_answer" name="input_answer" required oninput="updateCounter()">{{ answer or '' }}</textarea>
+            <div class="char-counter"><span id="charCount">0</span> 字（推奨 30〜80字）</div>
+          </div>
+
+          <button type="submit" name="action" value="submit" formaction="/?action=submit">✉️ 添削を実行</button>
+          {% endif %}
+        {% endif %}
+
+        <!-- 採点結果 -->
+        {% if score %}
+        <div class="result-box">
+          <p><strong>🏆 点数：</strong> {{ score }}</p>
+          {% if comment %}<p><strong>📖 講評：</strong> {{ comment }}</p>{% endif %}
+          {% if model_answer %}<p><strong>💡 模範解答：</strong> {{ model_answer }}</p>{% endif %}
+          {% if explanation %}<p><strong>📕 解説：</strong> {{ explanation }}</p>{% endif %}
+          {% if intention %}<p><strong>📚 出題意図：</strong> {{ intention }}</p>{% endif %}
+
+          {% if criteria and criteria|length > 0 %}
+            <hr>
+            <p><strong>🔍 採点観点（criteria）：</strong></p>
+            <ul class="criteria-list">
+              {% for c in criteria %}
+                <li>
+                  <span class="badge {% if c.ok %}ok{% else %}ng{% endif %}">
+                    {% if c.ok %}✔{% else %}✖{% endif %}
+                  </span>
+                  <strong>{{ c.name or '観点' }}</strong>
+                  {% if c.note %}：{{ c.note }}{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- ▼ ストック一覧（ページ下部） -->
+        {% if generated_questions and generated_questions|length > 0 %}
+        <div class="form-group result-box" style="margin-top:32px;">
+          <p><strong>📚 ストックされた自動生成問題：</strong></p>
+          <ul>
+            {% for q in generated_questions %}
+              <li>
+                <div>
+                  <strong>{{ q.date }}</strong> ｜ <span>{{ q.subject }}・{{ q.detail }}</span><br>
+                  <span class="display-question">「{{ q.question[:70] }}{% if q.question|length > 70 %}...{% endif %}」</span>
+                </div>
+                <div class="stock-actions">
+                  <form method="post" style="display:inline-block;margin-right:8px;">
+                    <input type="hidden" name="selected_question_index" value="{{ loop.index0 }}">
+                    <button type="submit" class="secondary-btn" name="action" value="select_stock" formaction="/?action=select_stock" formnovalidate>この問題を出題</button>
+                  </form>
+                  <form method="post" style="display:inline-block;">
+                    <input type="hidden" name="delete_index" value="{{ loop.index0 }}">
+                    <button type="submit" class="delete-btn" name="action" value="delete_stock" formaction="/?action=delete_stock" formnovalidate onclick="return confirm('この問題をストックから削除します。よろしいですか？');">削除</button>
+                  </form>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+        <!-- ▲ ストック一覧 ここまで -->
+
+      </div>
+    </form>
+  </div>
+
+  <script>
+    function updateCounter() {
+      var ta = document.getElementById('input_answer');
+      if (!ta) return;
+      var count = (ta.value || '').length;
+      var cc = document.getElementById('charCount');
+      if (cc) cc.textContent = count;
+    }
+
+    (function () {
+      const form = document.getElementById('mainForm');
+      const loading = document.getElementById('loading');
+
+      function hideLoading() {
+        if (loading && !loading.classList.contains('hidden')) {
+          loading.classList.add('hidden');
+          loading.setAttribute('aria-hidden', 'true');
+        }
+        if (form) {
+          const btns = form.querySelectorAll('button');
+          btns.forEach(b => b.disabled = false);
+        }
+      }
+      function showLoading() {
+        if (loading) {
+          loading.classList.remove('hidden');
+          loading.removeAttribute('aria-hidden');
+        }
+        if (form) {
+          const btns = form.querySelectorAll('button');
+          btns.forEach(b => b.disabled = true);
+        }
+      }
+      if (form) form.addEventListener('submit', function () { showLoading(); });
+
+      document.addEventListener('DOMContentLoaded', function () { hideLoading(); updateCounter(); });
+      window.addEventListener('load', hideLoading);
+      window.addEventListener('pageshow', hideLoading);
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') hideLoading(); });
+    })();
+  </script>
+</body>
+</html>

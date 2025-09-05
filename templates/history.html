@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>添削履歴</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h2>📖 添削履歴</h2>
+    <a href="/">← トップに戻る</a>
+    <ul>
+        {% for r in records %}
+            <li>
+                <strong>{{ r.date }}</strong><br>
+                <b>問題：</b>{{ r.question }}<br>
+                <b>回答：</b>{{ r.answer }}<br>
+                <b>点数：</b>{{ r.score }}<br>
+                <b>コメント：</b>{{ r.comment }}<br>
+                <hr>
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+</body>
+</html>
