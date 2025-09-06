@@ -1,269 +1,376 @@
+# templates/index.html
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>記述式 自動添削アプリ</title>
-  <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <title>記述添削アプリ（テスト版）</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    :root{
+      --text-dark:#111827;           /* ほぼ黒 */
+      --muted:#6b7280;               /* グレー */
+      --card:#ffffff;                /* カード背景 */
+      --border:#e5e7eb;              /* 枠線 */
+      --pastel-bg:#f5f3ff;           /* うす紫（ラベンダー） */
+      --pastel-accent:#e9d5ff;       /* さらに薄い紫 */
+      --pastel-accent-strong:#c4b5fd;/* 枠に使う淡い紫 */
+      --primary:#a78bfa;             /* ボタンのやさしい紫 */
+      --primary-strong:#7c3aed;      /* 濃い紫（境界・ホバー） */
+    }
+    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; line-height:1.6; color:var(--text-dark); background:#fff; }
+    .container{ max-width:980px; margin:24px auto; padding:0 16px; }
+    h1{ margin-bottom:8px; }
+    .desc{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-strong); padding:12px; border-radius:12px; margin:12px 0 24px; }
+
+    /* タブ */
+    .tabs{ display:flex; gap:8px; margin-bottom:12px; }
+    .tab-btn{ padding:8px 12px; border:1px solid var(--pastel-accent-strong); background:var(--pastel-bg); border-radius:10px; cursor:pointer; color:var(--text-dark) !important; }
+    .tab-btn:hover{ background:var(--pastel-accent); }
+    .tab-btn.active{ background:var(--primary); color:#fff !important; border-color:var(--primary-strong); }
+
+    /* レイアウト */
+    .grid{ display:grid; gap:12px; grid-template-columns:repeat(12,1fr); }
+    .col-4{ grid-column:span 4; }
+    .col-6{ grid-column:span 6; }
+    .col-12{ grid-column:span 12; }
+
+    label{ font-size:14px; color:#374151; display:block; margin-bottom:4px; }
+    select, input[type="text"], textarea{ width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:var(--text-dark); }
+    textarea{ min-height:120px; }
+
+    .card{ border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--card); }
+    .btn{ padding:10px 16px; border-radius:10px; border:1px solid var(--primary-強); background:var(--primary); color:#fff; cursor:pointer; }
+    .btn:hover{ background:var(--primary-strong); }
+    .btn.secondary{ background:#fff; color:var(--primary-strong); border:1px solid var(--primary-strong); }
+
+    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .muted{ color:var(--muted); font-size:13px; }
+
+    /* 出力表示 */
+    pre{ background:var(--pastel-bg); color:var(--text-dark); padding:12px; border-radius:10px; border:1px solid var(--pastel-accent-strong); overflow-x:auto; }
+
+    /* ヒント（想定解答/出題意図/観点） */
+    details.hints{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-強); border-radius:12px; padding:10px 14px; }
+    details.hints > summary{ cursor:pointer; font-weight:600; color:#4c1d95; list-style:none; }
+    details.hints > summary::-webkit-details-marker{ display:none; }
+    .hint-content{ margin-top:8px; }
+    .badge{ display:inline-block; padding:2px 6px; border:1px solid var(--pastel-accent-strong); border-radius:6px; font-size:12px; color:#4b5563; background:#faf5ff; }
+  </style>
 </head>
 <body>
   <div class="container">
-
-    <div id="loading" class="loading hidden" aria-hidden="true">
-      <div class="spinner" role="progressbar" aria-label="処理中"></div>
-      <div class="loading-text">処理中です…</div>
+    <h1>記述添削アプリ（テスト版）</h1>
+    <div class="desc">
+      <strong>使い方</strong><br/>
+      ① 上のタブで <b>社会</b>／<b>理科</b> を選び、必要項目（単元・学年・分野・難易度など）を指定します。<br/>
+      ② 「出題モード」を選び、<b>自動生成</b> または <b>ストックから出題（手動/自動）</b> を選択します。<br/>
+      ③ <b>問題を生成</b> を押すと、問題が表示されます。<b>ヒント</b>（想定解答／出題意図／観点）は開閉できます。<br/>
+      ④ 生徒の解答を入力して <b>採点</b> を押すと、10点満点のスコアと講評が表示されます。
     </div>
 
-    <h1>✨ 記述式 自動添削アプリ ✨</h1>
+    <!-- タブ -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-social">社会</button>
+      <button class="tab-btn" id="tab-science">理科</button>
+    </div>
 
-    <!-- ▼ ショート説明（常時表示） ▼ -->
-    <div class="intro">
-      <p>
-        中学生向けの記述式問題を自動で出題し、解答を入力すると
-        <strong>AIが採点・講評・模範解答</strong>を返します。<br>
-        宮城県公立高校入試や定期テストに対応したレベルで練習できます。
-      </p>
-      <details class="howto" aria-label="使い方を開閉">
-        <summary>使い方を見る</summary>
-        <div class="howto-body">
-          <ol>
-            <li><strong>出題モードを選ぶ</strong>：
-              <ul>
-                <li>手動プリセット（基本問題）</li>
-                <li>GPT自動生成（資料読解／用語説明／入試レベル／定期テスト）</li>
-                <li>用語説明（重要語）</li>
-              </ul>
-            </li>
-            <li><strong>教科・単元を選ぶ</strong>：
-              社会（地理／歴史／公民）または 理科（学年＋分野）</li>
-            <li><strong>🌟問題を出題</strong>：問題が表示されます。
-              自動生成問題はストックに保存（<strong>最大10件</strong>、古い順に自動削除）。</li>
-            <li><strong>解答を入力</strong>：30〜80字目安。文字数カウンターで確認可能。</li>
-            <li><strong>✉️添削を実行</strong>：点数・講評・模範解答・解説・出題意図・採点観点が返ります。</li>
-            <li><strong>ストックの活用</strong>：後から同じ問題に再挑戦／不要なら削除。</li>
-          </ol>
-          <p class="note">※ 資料読解問題は、外部画像なしで解けるように、問題文内の「資料A/B」に簡易データ（数値）を含めています。</p>
+    <!-- 社会 設定 -->
+    <div id="panel-social" class="card">
+      <div class="grid">
+        <div class="col-6">
+          <label>分野（社会）</label>
+          <select id="social-branch">
+            <option value="歴史">歴史</option>
+            <option value="地理">地理</option>
+            <option value="公民">公民</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label>単元・時代（例：弥生時代／日本地理の工業／地方自治）</label>
+          <input id="social-unit" type="text" placeholder="例：弥生時代" />
+        </div>
+        <div class="col-6">
+          <label>難易度</label>
+          <select id="difficulty-social">
+            <option value="5">5点問題（基礎〜標準）</option>
+            <option value="10">10点問題（標準〜やや発展）</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label>出題モード</label>
+          <select id="mode-social">
+            <option value="auto">自動生成</option>
+            <option value="stock-auto">ストックから出題（自動）</option>
+            <option value="manual">ストックから出題（手動プリセット）</option>
+          </select>
+        </div>
+        <div class="col-12" id="manual-area-social" style="display:none;">
+          <label>手動プリセット問題（そのまま出題に使用）</label>
+          <textarea id="manual-text-social" placeholder="（例）問題: ……&#10;想定解答: ……&#10;出題意図: ……&#10;模範解答の観点: ……"></textarea>
+          <div class="muted">既存のプリントや過去問から抜粋する場合にお使いください。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 理科 設定 -->
+    <div id="panel-science" class="card" style="display:none;">
+      <div class="grid">
+        <div class="col-4">
+          <label>学年（理科）</label>
+          <select id="sci-grade">
+            <option value="中1">中1</option>
+            <option value="中2">中2</option>
+            <option value="中3">中3</option>
+          </select>
+        </div>
+        <div class="col-4">
+          <label>分野</label>
+          <select id="sci-domain">
+            <option value="生物">生物</option>
+            <option value="化学">化学</option>
+            <option value="地学">地学</option>
+            <option value="物理">物理</option>
+            <option value="天体">天体</option>
+          </select>
+        </div>
+        <div class="col-4">
+          <label>難易度</label>
+          <select id="difficulty-science">
+            <option value="5">5点問題（基礎〜標準）</option>
+            <option value="10">10点問題（標準〜やや発展）</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <label>トピック（任意：例「光合成」「イオン」「台風」など）</label>
+          <input id="sci-topic" type="text" placeholder="例：光合成" />
+        </div>
+        <div class="col-6">
+          <label>出題モード</label>
+          <select id="mode-science">
+            <option value="auto">自動生成</option>
+            <option value="stock-auto">ストックから出題（自動）</option>
+            <option value="manual">ストックから出題（手動プリセット）</option>
+          </select>
+        </div>
+        <div class="col-12" id="manual-area-science" style="display:none;">
+          <label>手動プリセット問題（そのまま出題に使用）</label>
+          <textarea id="manual-text-science" placeholder="（例）問題: ……&#10;想定解答: ……&#10;出題意図: ……&#10;模範解答の観点: ……"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 実行ボタン -->
+    <div class="row" style="margin: 12px 0;">
+      <button class="btn" id="btn-generate">問題を生成</button>
+      <button class="btn secondary" id="btn-reset">形式履歴をリセット</button>
+      <span class="muted"><span class="badge">注意</span> 初回は数秒かかることがあります。</span>
+    </div>
+
+    <!-- 出題結果 -->
+    <div class="card">
+      <h3>生成された問題</h3>
+      <pre id="question-out">（ここに問題が表示されます）</pre>
+
+      <!-- ▼ 追加：想定解答の表示トグル -->
+      <div class="row" style="margin:8px 0;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="toggle-answer" />
+          想定解答を表示（教師用）
+        </label>
+      </div>
+
+      <!-- ヒント（開閉） -->
+      <details class="hints" id="hints" style="display:none;">
+        <summary>ヒント（想定解答・出題意図・観点）を表示</summary>
+        <div class="hint-content">
+          <!-- ▼ 変更：想定解答ブロックに id を付与 -->
+          <div id="hint-answer-block"><b>想定解答</b><div><pre id="hint-answer"></pre></div></div>
+          <div><b>出題意図</b><div><pre id="hint-intent"></pre></div></div>
+          <div><b>模範解答の観点</b><ul id="hint-points"></ul></div>
         </div>
       </details>
     </div>
-    <!-- ▲ ショート説明＋詳細展開 ここまで ▲ -->
 
-    <form method="post" id="mainForm" autocomplete="off">
-      <div class="form-card">
-        <!-- 出題モード -->
-        <div class="form-group">
-          <label for="mode">出題モード</label>
-          <select id="mode" name="mode" onchange="this.form.submit()">
-            <option value="manual" {% if sel.mode == 'manual' %}selected{% endif %}>ストックから出題（手動プリセット）</option>
-            <option value="gpt" {% if sel.mode == 'gpt' %}selected{% endif %}>GPTで自動生成</option>
-            <option value="glossary" {% if sel.mode == 'glossary' %}selected{% endif %}>用語説明（重要語）</option>
-          </select>
-        </div>
-
-        <!-- 教科 -->
-        <div class="form-group">
-          <label for="subject">教科</label>
-          <select id="subject" name="subject" onchange="this.form.submit()">
-            <option value="社会" {% if sel.subject == '社会' %}selected{% endif %}>社会</option>
-            <option value="理科" {% if sel.subject == '理科' %}selected{% endif %}>理科</option>
-          </select>
-        </div>
-
-        <!-- 社会 -->
-        {% if sel.subject == '社会' %}
-        <div class="form-group">
-          <label for="field">分野（社会）</label>
-          <select id="field" name="field" onchange="this.form.submit()">
-            <option value="地理" {% if sel.field == '地理' %}selected{% endif %}>地理</option>
-            <option value="歴史" {% if sel.field == '歴史' %}selected{% endif %}>歴史</option>
-            <option value="公民" {% if sel.field == '公民' %}selected{% endif %}>公民</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="era">単元（{{ sel.field }}）</label>
-          <select id="era" name="era" onchange="this.form.submit()">
-            {% for unit in soc_units_map[sel.field] %}
-              <option value="{{ unit }}" {% if sel.era == unit %}selected{% endif %}>{{ unit }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <!-- 理科 -->
-        {% elif sel.subject == '理科' %}
-        <div class="form-group">
-          <label for="grade">学年（理科）</label>
-          <select id="grade" name="grade" onchange="this.form.submit()">
-            <option value="中1" {% if sel.grade == '中1' %}selected{% endif %}>中1</option>
-            <option value="中2" {% if sel.grade == '中2' %}selected{% endif %}>中2</option>
-            <option value="中3" {% if sel.grade == '中3' %}selected{% endif %}>中3</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="genre">単元（理科）</label>
-          <select id="genre" name="genre" onchange="this.form.submit()">
-            <option value="生物" {% if sel.genre == '生物' %}selected{% endif %}>生物</option>
-            <option value="化学" {% if sel.genre == '化学' %}selected{% endif %}>化学</option>
-            <option value="物理" {% if sel.genre == '物理' %}selected{% endif %}>物理</option>
-            <option value="地学" {% if sel.genre == '地学' %}selected{% endif %}>地学</option>
-            {% if sel.grade == '中3' %}
-              <option value="天体" {% if sel.genre == '天体' %}selected{% endif %}>天体</option>
-            {% endif %}
-          </select>
-        </div>
-        {% endif %}
-
-        <!-- GPT自動生成用：出題タイプ -->
-        {% if sel.mode == 'gpt' %}
-        <div class="form-group">
-          <label for="qstyle">出題タイプ（GPT）</label>
-          <select id="qstyle" name="qstyle" onchange="this.form.submit()">
-            <option value="auto" {% if sel.qstyle == 'auto' %}selected{% endif %}>おまかせ（バランス）</option>
-            <option value="materials" {% if sel.qstyle == 'materials' %}selected{% endif %}>資料読解（ミニ表/数値付き）</option>
-            <option value="glossary" {% if sel.qstyle == 'glossary' %}selected{% endif %}>用語説明（重要語）</option>
-            <option value="exam" {% if sel.qstyle == 'exam' %}selected{% endif %}>入試レベルの記述（宮城県テイスト）</option>
-            <option value="school" {% if sel.qstyle == 'school' %}selected{% endif %}>定期テストの記述（教科書準拠）</option>
-          </select>
-        </div>
-        {% endif %}
-
-        <!-- 用語説明モード専用の用語選択（任意） -->
-        {% if sel.mode == 'glossary' %}
-          <div class="form-group">
-            <label for="term">用語（任意：指定しない場合はランダム）</label>
-            <select id="term" name="term">
-              <option value="">（指定しない）</option>
-              {% for t in term_list %}
-                <option value="{{ t }}">{{ t }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        {% endif %}
-
-        <!-- 出題ボタン -->
-        <button type="submit" name="action" value="generate" formaction="/?action=generate" formnovalidate>🌟 問題を出題</button>
-
-        <!-- 問題と解答 -->
-        {% if question %}
-          {% if question.startswith('（エラー）') %}
-          <div class="result-box error-box"><p>{{ question }}</p></div>
-          {% else %}
-          <div class="form-group">
-            <label for="question">問題</label>
-            <textarea id="question" name="question" readonly>{{ question }}</textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="input_answer">解答を入力（30〜80字 推奨）</label>
-            <textarea id="input_answer" name="input_answer" required oninput="updateCounter()">{{ answer or '' }}</textarea>
-            <div class="char-counter"><span id="charCount">0</span> 字（推奨 30〜80字）</div>
-          </div>
-
-          <button type="submit" name="action" value="submit" formaction="/?action=submit">✉️ 添削を実行</button>
-          {% endif %}
-        {% endif %}
-
-        <!-- 採点結果 -->
-        {% if score %}
-        <div class="result-box">
-          <p><strong>🏆 点数：</strong> {{ score }}</p>
-          {% if comment %}<p><strong>📖 講評：</strong> {{ comment }}</p>{% endif %}
-          {% if model_answer %}<p><strong>💡 模範解答：</strong> {{ model_answer }}</p>{% endif %}
-          {% if explanation %}<p><strong>📕 解説：</strong> {{ explanation }}</p>{% endif %}
-          {% if intention %}<p><strong>📚 出題意図：</strong> {{ intention }}</p>{% endif %}
-
-          {% if criteria and criteria|length > 0 %}
-            <hr>
-            <p><strong>🔍 採点観点（criteria）：</strong></p>
-            <ul class="criteria-list">
-              {% for c in criteria %}
-                <li>
-                  <span class="badge {% if c.ok %}ok{% else %}ng{% endif %}">
-                    {% if c.ok %}✔{% else %}✖{% endif %}
-                  </span>
-                  <strong>{{ c.name or '観点' }}</strong>
-                  {% if c.note %}：{{ c.note }}{% endif %}
-                </li>
-              {% endfor %}
-            </ul>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        <!-- ▼ ストック一覧（ページ下部） -->
-        {% if generated_questions and generated_questions|length > 0 %}
-        <div class="form-group result-box" style="margin-top:32px;">
-          <p><strong>📚 ストックされた自動生成問題：</strong></p>
-          <ul>
-            {% for q in generated_questions %}
-              <li>
-                <div>
-                  <strong>{{ q.date }}</strong> ｜ <span>{{ q.subject }}・{{ q.detail }}</span><br>
-                  <span class="display-question">「{{ q.question[:70] }}{% if q.question|length > 70 %}...{% endif %}」</span>
-                </div>
-                <div class="stock-actions">
-                  <form method="post" style="display:inline-block;margin-right:8px;">
-                    <input type="hidden" name="selected_question_index" value="{{ loop.index0 }}">
-                    <button type="submit" class="secondary-btn" name="action" value="select_stock" formaction="/?action=select_stock" formnovalidate>この問題を出題</button>
-                  </form>
-                  <form method="post" style="display:inline-block;">
-                    <input type="hidden" name="delete_index" value="{{ loop.index0 }}">
-                    <button type="submit" class="delete-btn" name="action" value="delete_stock" formaction="/?action=delete_stock" formnovalidate onclick="return confirm('この問題をストックから削除します。よろしいですか？');">削除</button>
-                  </form>
-                </div>
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-        <!-- ▲ ストック一覧 ここまで -->
-
+    <!-- 採点 -->
+    <div class="card">
+      <h3>採点</h3>
+      <label>生徒の解答（30〜80字目安）</label>
+      <textarea id="answer"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn" id="btn-grade">採点する</button>
+        <span class="muted">出題直後の問題をもとに採点します。</span>
       </div>
-    </form>
+      <div style="margin-top:12px;">
+        <div id="grade-out"></div>
+      </div>
+    </div>
   </div>
 
   <script>
-    function updateCounter() {
-      var ta = document.getElementById('input_answer');
-      if (!ta) return;
-      var count = (ta.value || '').length;
-      var cc = document.getElementById('charCount');
-      if (cc) cc.textContent = count;
+    // タブ切り替え
+    const tabSocial = document.getElementById("tab-social");
+    const tabScience = document.getElementById("tab-science");
+    const panelSocial = document.getElementById("panel-social");
+    const panelScience = document.getElementById("panel-science");
+
+    tabSocial.addEventListener("click", () => {
+      tabSocial.classList.add("active"); tabScience.classList.remove("active");
+      panelSocial.style.display = ""; panelScience.style.display = "none";
+    });
+    tabScience.addEventListener("click", () => {
+      tabScience.classList.add("active"); tabSocial.classList.remove("active");
+      panelScience.style.display = ""; panelSocial.style.display = "none";
+    });
+
+    // モード切替で手動エリアの出し分け
+    const modeSocial = document.getElementById("mode-social");
+    const manualAreaSocial = document.getElementById("manual-area-social");
+    modeSocial.addEventListener("change", () => {
+      manualAreaSocial.style.display = modeSocial.value === "manual" ? "" : "none";
+    });
+
+    const modeScience = document.getElementById("mode-science");
+    const manualAreaScience = document.getElementById("manual-area-science");
+    modeScience.addEventListener("change", () => {
+      manualAreaScience.style.display = modeScience.value === "manual" ? "" : "none";
+    });
+
+    // ▼ 追加：想定解答の任意表示トグル（ローカル保存つき）
+    const toggleAns = document.getElementById("toggle-answer");
+    const hintAnswerBlock = document.getElementById("hint-answer-block");
+    let showAnswer = JSON.parse(localStorage.getItem("showAnswer") || "false");
+    if (toggleAns) toggleAns.checked = showAnswer;
+
+    function applyAnswerVisibility(hasAnswer){
+      if (!hasAnswer){
+        hintAnswerBlock.style.display = "none";
+        return;
+      }
+      hintAnswerBlock.style.display = toggleAns.checked ? "" : "none";
+    }
+    if (toggleAns){
+      toggleAns.addEventListener("change", () => {
+        localStorage.setItem("showAnswer", JSON.stringify(toggleAns.checked));
+        const has = (document.getElementById("hint-answer").textContent || "").trim().length > 0;
+        applyAnswerVisibility(has);
+      });
     }
 
-    (function () {
-      const form = document.getElementById('mainForm');
-      const loading = document.getElementById('loading');
+    // 直近の生成結果（採点用に保持）
+    let lastQuestionText = "";
 
-      function hideLoading() {
-        if (loading && !loading.classList.contains('hidden')) {
-          loading.classList.add('hidden');
-          loading.setAttribute('aria-hidden', 'true');
+    // モデル出力の分割
+    function extractSection(text, label){
+      const re = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*([\\s\\S]*?)(?=\\n(?:問題:|想定解答:|出題意図:|模範解答の観点:)|$)");
+      const m = text.match(re);
+      return m ? m[1].trim() : "";
+    }
+    function parseGenerated(text){
+      const q = extractSection(text, "問題:");
+      const a = extractSection(text, "想定解答:");
+      const i = extractSection(text, "出題意図:");
+      const pRaw = extractSection(text, "模範解答の観点:");
+      const points = pRaw ? pRaw.split(/\n|・|-/).map(s=>s.trim()).filter(Boolean) : [];
+      return {question:q || text, answer:a, intent:i, points};
+    }
+
+    // 生成
+    document.getElementById("btn-generate").addEventListener("click", async () => {
+      const isSocial = tabSocial.classList.contains("active");
+      let payload = { category: isSocial ? "社会" : "理科" };
+
+      if (isSocial) {
+        payload.branch = document.getElementById("social-branch").value;
+        payload.unit_or_era = document.getElementById("social-unit").value || "弥生時代";
+        payload.difficulty = document.getElementById("difficulty-social").value;
+        payload.mode = document.getElementById("mode-social").value;
+        if (payload.mode === "manual") {
+          payload.manual_text = document.getElementById("manual-text-social").value || "";
         }
-        if (form) {
-          const btns = form.querySelectorAll('button');
-          btns.forEach(b => b.disabled = false);
+      } else {
+        payload.grade = document.getElementById("sci-grade").value;
+        payload.domain = document.getElementById("sci-domain").value;
+        payload.topic = document.getElementById("sci-topic").value || "";
+        payload.difficulty = document.getElementById("difficulty-science").value;
+        payload.mode = document.getElementById("mode-science").value;
+        if (payload.mode === "manual") {
+          payload.manual_text = document.getElementById("manual-text-science").value || "";
         }
       }
-      function showLoading() {
-        if (loading) {
-          loading.classList.remove('hidden');
-          loading.removeAttribute('aria-hidden');
-        }
-        if (form) {
-          const btns = form.querySelectorAll('button');
-          btns.forEach(b => b.disabled = true);
-        }
-      }
-      if (form) form.addEventListener('submit', function () { showLoading(); });
 
-      document.addEventListener('DOMContentLoaded', function () { hideLoading(); updateCounter(); });
-      window.addEventListener('load', hideLoading);
-      window.addEventListener('pageshow', hideLoading);
-      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') hideLoading(); });
-    })();
+      try {
+        const res = await fetch("/api/generate_question", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const parsed = parseGenerated(data.text || "");
+          document.getElementById("question-out").textContent = parsed.question || "（問題テキストが取得できませんでした）";
+
+          // ヒントをセット（空なら非表示）
+          const hints = document.getElementById("hints");
+          const hasHints = (parsed.answer || parsed.intent || (parsed.points && parsed.points.length));
+          if (hasHints){
+            document.getElementById("hint-answer").textContent = parsed.answer || "";
+            document.getElementById("hint-intent").textContent = parsed.intent || "";
+            const ul = document.getElementById("hint-points");
+            ul.innerHTML = (parsed.points||[]).map(s=>`<li>${s}</li>`).join("");
+            hints.style.display = ""; // 表示
+            hints.open = false;        // デフォルトは閉じる（ヒントとして）
+
+            // ▼ 追加：想定解答の表示/非表示を反映
+            applyAnswerVisibility(!!parsed.answer);
+
+          } else {
+            hints.style.display = "none";
+          }
+
+          lastQuestionText = data.text;
+        } else {
+          document.getElementById("question-out").textContent = "エラー: " + (data.error || "不明なエラー");
+          document.getElementById("hints").style.display = "none";
+        }
+      } catch (e) {
+        document.getElementById("question-out").textContent = "通信エラー: " + e;
+        document.getElementById("hints").style.display = "none";
+      }
+    });
+
+    // 採点
+    document.getElementById("btn-grade").addEventListener("click", async () => {
+      const answer = document.getElementById("answer").value || "";
+      if (!lastQuestionText){
+        document.getElementById("grade-out").innerHTML = "<span class='muted'>先に問題を生成してください。</span>";
+        return;
+      }
+      try{
+        const res = await fetch("/api/grade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: lastQuestionText, answer }),
+        });
+        const data = await res.json();
+        if (data.ok){
+          document.getElementById("grade-out").innerHTML =
+            `<div class="row"><div class="badge">score</div> <b>${data.score}/10</b></div>
+             <div class="muted" style="margin-top:6px;">${data.summary || ""}</div>
+             <div style="margin-top:8px;"><b>理由</b><ul>${(data.reasons || []).map(r=>`<li>${r}</li>`).join("")}</ul></div>
+             <div><b>模範解答</b><div><pre>${data.model_answer || ""}</pre></div></div>
+             <div><b>改善ポイント</b><ul>${(data.points || []).map(p=>`<li>${p}</li>`).join("")}</ul></div>`;
+        } else {
+          document.getElementById("grade-out").textContent = "エラー: " + (data.error || "採点に失敗しました");
+        }
+      } catch(e){
+        document.getElementById("grade-out").textContent = "通信エラー: " + e;
+      }
+    });
+
+    // 履歴リセット
+    document.getElementById("btn-reset").addEventListener("click", async () => {
+      try { await fetch("/api/reset_session", { method: "POST" }); } catch {}
+    });
   </script>
 </body>
 </html>
