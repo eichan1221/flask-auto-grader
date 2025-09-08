@@ -1,20 +1,29 @@
 # app.py
 # 社会/理科タブ・難易度・ストック（手動/自動）・説明UIに対応したフル版
+# + 安定化拡張: CORS, OpenAI timeout, /ping, ACCESS_CODE ゲート
 
 import os
 import json
 import random
 import time
 from typing import List, Dict, Any
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, make_response
 from dotenv import load_dotenv
 from openai import OpenAI
+from flask_cors import CORS  # 追加
 
 # ====== 初期化 ======
 load_dotenv()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")  # 例: https://xxxx.onrender.com
+ACCESS_CODE = os.environ.get("ACCESS_CODE")             # 例: test-2025（未設定なら無効）
+
 app = Flask(__name__)
-client = OpenAI(api_key=OPENAI_API_KEY)
+# /api/* へのCORSのみ許可（ALLOWED_ORIGIN 未設定時は広めに許可）
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGIN}})
+
+# OpenAI クライアント（timeout 追加）
+client = OpenAI(api_key=OPENAI_API_KEY, timeout=30) if OPENAI_API_KEY else None
 
 # ====== 生成パラメータ ======
 GEN_TEMPERATURE = 0.8
@@ -175,13 +184,23 @@ def user_prompt_grade(question: str, answer: str) -> str:
 }}
 """.strip()
 
+# ====== OpenAI クライアント確保（保険） ======
+def ensure_client() -> OpenAI:
+    global client
+    if client is not None:
+        return client
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is not set on the server.")
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=30)
+    return client
+
 # ====== 生成関数 ======
 def generate_via_model_for_social(branch: str, unit: str, difficulty: str) -> str:
     msgs = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt_social(branch, unit, difficulty)},
     ]
-    resp = client.chat.completions.create(
+    resp = ensure_client().chat.completions.create(
         model="gpt-4o-mini",
         temperature=GEN_TEMPERATURE,
         top_p=GEN_TOP_P,
@@ -197,7 +216,7 @@ def generate_via_model_for_science(grade: str, domain: str, topic: str, difficul
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt_science(grade, domain, topic, difficulty)},
     ]
-    resp = client.chat.completions.create(
+    resp = ensure_client().chat.completions.create(
         model="gpt-4o-mini",
         temperature=GEN_TEMPERATURE,
         top_p=GEN_TOP_P,
@@ -209,11 +228,35 @@ def generate_via_model_for_science(grade: str, domain: str, topic: str, difficul
     detect_format_tag(text, hint)
     return text
 
+# ====== アクセスゲート（ACCESS_CODE が設定されている時だけ有効） ======
+@app.before_request
+def access_gate():
+    if not ACCESS_CODE:
+        return  # 無効時は何もしない
+    path = request.path or "/"
+    # 常時許可
+    if path.startswith("/static") or path in ("/ping", "/healthz", "/favicon.ico"):
+        return
+    # 既に通過済み
+    if request.cookies.get("access_code") == ACCESS_CODE:
+        return
+    # ?code=XXXX で通過 → Cookie 設定
+    code = request.args.get("code")
+    if code == ACCESS_CODE:
+        resp = make_response(redirect(path))
+        resp.set_cookie("access_code", ACCESS_CODE, max_age=60*60*24*7, secure=True, httponly=True, samesite="Lax")
+        return resp
+    return ("Access code required", 403)
+
 # ====== ルーティング ======
 @app.route("/")
 def index():
     sel = {"mode": "auto"}
     return render_template("index.html", sel=sel)
+
+@app.get("/ping")
+def ping():
+    return "pong", 200
 
 @app.route("/api/generate_question", methods=["POST"])
 def api_generate_question():
@@ -262,7 +305,7 @@ def api_grade():
             {"role": "system", "content": SYSTEM_PROMPT_GRADER},
             {"role": "user", "content": user_prompt_grade(question, answer)},
         ]
-        resp = client.chat.completions.create(
+        resp = ensure_client().chat.completions.create(
             model="gpt-4o-mini",
             temperature=GRADE_TEMPERATURE,
             top_p=GRADE_TOP_P,
@@ -293,5 +336,4 @@ def healthz():
     return "ok", 200
 
 if __name__ == "__main__":
-    import os
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)), debug=False)
