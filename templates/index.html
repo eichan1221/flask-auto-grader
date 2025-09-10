@@ -1,531 +1,514 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <title>記述式API（個人運用版）UI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>記述添削アプリ（テスト版）</title>
-  <link rel="stylesheet" href="/static/style.css" />
   <style>
     :root{
-      --text-dark:#111827;
-      --muted:#6b7280;
-      --card:#ffffff;
-      --border:#e5e7eb;
-      --pastel-bg:#f5f3ff;
-      --pastel-accent:#e9d5ff;       /* 共有いただいたCSSに合わせる */
-      --pastel-accent-strong:#c4b5fd;
-      --primary:#a78bfa;
-      --primary-strong:#7c3aed;
+      --bg1:#fdf6ff; --bg2:#f0fbff;
+      --ink:#1f2937; --muted:#6b7280;
+      --brand:#c084fc; --brand-strong:#a855f7;
+      --accent:#f9a8d4; --accent-strong:#f472b6;
+      --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+      --card:#ffffff; --border:#e5e7eb; --shadow:rgba(0,0,0,0.08);
     }
-    body{ line-height:1.6; color:var(--text-dark); background:#fff; }
-    .container{ max-width:980px; margin:24px auto; padding:0 16px; }
-    h1{ margin-bottom:8px; }
-    .desc{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-strong); padding:12px; border-radius:12px; margin:12px 0 24px; }
-
-    /* タブ */
-    .tabs{ display:flex; gap:8px; margin-bottom:12px; }
-    .tab-btn{ padding:8px 12px; border:1px solid var(--pastel-accent-strong); background:var(--pastel-bg); border-radius:10px; cursor:pointer; color:var(--text-dark) !important; min-height:42px; }
-    .tab-btn:hover{ background:var(--pastel-accent); }
-    .tab-btn.active{ background:var(--primary); color:#fff !important; border-color:var(--primary-strong); }
-
-    /* レイアウト */
-    .grid{ display:grid; gap:12px; grid-template-columns:repeat(12,1fr); }
-    .col-4{ grid-column:span 4; }
-    .col-6{ grid-column:span 6; }
-    .col-12{ grid-column:span 12; }
-
-    @media (max-width: 720px){
-      .grid{ grid-template-columns:1fr; }
-      .col-4, .col-6, .col-12{ grid-column:1 / -1; }
-      body{ line-height:1.7; }           /* スマホ読みやすさUP */
-      .row{ gap:10px; }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;background:linear-gradient(180deg,var(--bg1),var(--bg2))}
+    header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,0.75);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--border)}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media (max-width:900px){.row{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 6px 20px var(--shadow);padding:16px}
+    h1{font-size:20px;margin:4px 0}
+    h2{font-size:18px;margin:8px 0 12px}
+    h3{font-size:15px;margin:10px 0 6px}
+    label{font-size:13px;color:var(--muted)}
+    input[type=text], select, textarea{
+      width:100%;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:14px;background:#fff
     }
-
-    /* ボタン（共有CSSと整合） */
-    .btn{ padding:10px 16px; border-radius:10px; border:1px solid var(--primary-strong); background:var(--primary); color:#fff; cursor:pointer; }
-    .btn:hover{ background:var(--primary-strong); }
-    .btn.secondary{ background:#fff; color:var(--primary-strong); border:1px solid var(--primary-strong); }
-
-    .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .muted{ color:var(--muted); font-size:13px; }
-
-    /* 出力表示 */
-    pre{ background:var(--pastel-bg); color:var(--text-dark); padding:12px; border-radius:10px; border:1px solid var(--pastel-accent-strong); overflow-x:auto; }
-
-    /* ヒント（想定解答/出題意図/観点） */
-    details.hints{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-strong); border-radius:12px; padding:10px 14px; }
-    details.hints > summary{ cursor:pointer; font-weight:600; color:#4c1d95; list-style:none; padding:6px 0; }
-    details.hints > summary::-webkit-details-marker{ display:none; }
-    .hint-content{ margin-top:8px; }
-    .badge{ display:inline-block; padding:2px 6px; border:1px solid var(--pastel-accent-strong); border-radius:6px; font-size:12px; color:#4b5563; background:#faf5ff; }
-
-    /* ストック一覧の簡易モーダル（見た目は現状テイスト踏襲） */
-    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
-    .modal .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
-    .stock-item{ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
-    .stock-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    textarea{min-height:120px;resize:vertical}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .flex-col{display:flex;gap:8px;flex-direction:column}
+    .btn{
+      border:1px solid var(--border);background:#fff;border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;cursor:pointer
+    }
+    .btn.brand{background:var(--brand);border-color:var(--brand);color:#fff}
+    .btn.ghost{background:transparent}
+    .btn.warn{background:var(--warn);border-color:var(--warn);color:#fff}
+    .btn.err{background:var(--err);border-color:var(--err);color:#fff}
+    .tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:#374151;background:#fff}
+    .toolbar{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width:700px){.grid-2{grid-template-columns:1fr}}
+    .pill{
+      display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#fff
+    }
+    .small{font-size:12px;color:var(--muted)}
+    .qcard{background:#fff;border:1px dashed var(--border);border-radius:12px;padding:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
+    .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
+    .toast.show{opacity:1;transform:none}
+    .danger{color:var(--err)}
+    .success{color:var(--ok)}
+    .muted{color:var(--muted)}
+    .divider{height:1px;background:var(--border);margin:8px 0}
+    .tab{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
+    .tab.active{background:var(--brand);border-color:var(--brand);color:#fff}
+    .list{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto}
+    .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
+    .caps{font-variant:all-small-caps;letter-spacing:.04em}
+    .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>記述添削アプリ（テスト版）</h1>
-    <div class="desc">
-      <strong>使い方</strong><br/>
-      ① 上のタブで <b>社会</b>／<b>理科</b> を選び、必要項目（単元・学年・分野・難易度など）を指定します。<br/>
-      ② 「出題モード」を選び、<b>自動生成</b> または <b>ストックから出題（手動/自動）</b> を選択します。<br/>
-      ③ <b>問題を生成</b> を押すと、問題が表示されます。<b>ヒント</b>（想定解答／出題意図／観点）は開閉できます。<br/>
-      ④ 生徒の解答を入力して <b>採点</b> を押すと、10点満点のスコアと講評が表示されます。
+  <header>
+    <div class="wrap toolbar">
+      <div class="flex" style="gap:10px">
+        <h1>記述式API（個人運用UI）</h1>
+        <span id="modelTag" class="tag">model: ...</span>
+      </div>
+      <div class="flex">
+        <button class="btn ghost" id="btnSettings">設定</button>
+        <button class="btn ghost" id="btnReload">再読込</button>
+      </div>
     </div>
+  </header>
 
-    <!-- タブ -->
-    <div class="tabs">
-      <button class="tab-btn active" id="tab-social">社会</button>
-      <button class="tab-btn" id="tab-science">理科</button>
-    </div>
-
-    <!-- 社会 設定 -->
-    <div id="panel-social" class="card">
-      <div class="grid">
-        <div class="col-6">
-          <label>分野（社会）</label>
-          <select id="social-branch">
-            <option value="歴史">歴史</option>
-            <option value="地理">地理</option>
-            <option value="公民">公民</option>
-          </select>
+  <main class="wrap" style="padding-top:12px;padding-bottom:40px">
+    <!-- 設定 -->
+    <div class="card" id="settingsCard" style="display:none">
+      <h2>接続設定</h2>
+      <div class="grid-2">
+        <div>
+          <label for="baseUrl">API Base URL（空=同一オリジン）</label>
+          <input type="text" id="baseUrl" placeholder="例 https://your.onrender.com">
+          <div class="small muted">CORSを設定済みのURLを指定。空欄なら同一オリジンを使用。</div>
         </div>
-        <div class="col-6">
-          <label>単元・時代（例：弥生時代／日本地理の工業／地方自治）</label>
-          <input id="social-unit" type="text" placeholder="例：弥生時代" />
+        <div>
+          <label for="accessCode">ACCESS_CODE（保護API用 / 任意）</label>
+          <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与">
+          <div class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
         </div>
-        <div class="col-6">
-          <label>難易度</label>
-          <select id="difficulty-social">
-            <option value="5">5点問題（基礎〜標準）</option>
-            <option value="10">10点問題（標準〜やや発展）</option>
-            <option value="満点">満点レベル（観点統合・根拠要求）</option>
-          </select>
-        </div>
-        <div class="col-6">
-          <label>出題モード</label>
-          <select id="mode-social">
-            <option value="auto">自動生成</option>
-            <option value="stock-auto">ストックから出題（自動）</option>
-            <option value="manual">ストックから出題（手動プリセット）</option>
-          </select>
-        </div>
-        <div class="col-12" id="manual-area-social" style="display:none;">
-          <label>手動プリセット問題（そのまま出題に使用）</label>
-          <textarea id="manual-text-social" placeholder="（例）問題: ……&#10;想定解答: ……&#10;出題意図: ……&#10;模範解答の観点: ……"></textarea>
-          <div class="muted">既存のプリントや過去問から抜粋する場合にお使いください。</div>
-        </div>
+      </div>
+      <div class="flex" style="margin-top:8px">
+        <button class="btn brand" id="btnSaveSettings">保存</button>
+        <button class="btn" id="btnHideSettings">閉じる</button>
+        <span id="statusLine" class="small muted"></span>
       </div>
     </div>
 
-    <!-- 理科 設定 -->
-    <div id="panel-science" class="card" style="display:none;">
-      <div class="grid">
-        <div class="col-4">
-          <label>学年（理科）</label>
-          <select id="sci-grade">
-            <option value="中1">中1</option>
-            <option value="中2">中2</option>
-            <option value="中3">中3</option>
+    <div class="row" style="margin-top:12px">
+      <!-- 左：生成 & ストック -->
+      <section class="card">
+        <div class="toolbar">
+          <h2>① 出題の生成 & ストック</h2>
+          <div class="flex">
+            <button class="btn" id="btnExportJson">📦 stocks.json</button>
+            <button class="btn" id="btnExportCsv">📊 stocks.csv</button>
+          </div>
+        </div>
+
+        <div class="flex" style="gap:6px;margin-bottom:8px">
+          <span class="tab active" data-subject="社会">社会</span>
+          <span class="tab" data-subject="理科">理科</span>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <label>分類（科目）</label>
+            <select id="category">
+              <option>地理</option>
+              <option>歴史</option>
+            </select>
+          </div>
+          <div id="gradeBox" style="display:none">
+            <label>学年（理科のみ）</label>
+            <select id="grade">
+              <option>中1</option>
+              <option>中2</option>
+              <option selected>中3</option>
+            </select>
+          </div>
+          <div>
+            <label>難易度/配点</label>
+            <select id="difficulty">
+              <option>5点</option>
+              <option selected>10点</option>
+            </select>
+          </div>
+          <div>
+            <label>解答分量の目安</label>
+            <input type="text" id="lengthHint" value="30〜80字程度">
+          </div>
+          <div>
+            <label>出題の方向性（任意）</label>
+            <input type="text" id="genreHint" placeholder="制度/文化/時代背景 など">
+          </div>
+          <div>
+            <label>避ける話題（任意）</label>
+            <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい">
+          </div>
+        </div>
+
+        <div class="flex" style="margin-top:8px">
+          <label class="pill"><input type="checkbox" id="includeHints"> ヒント（模範解答等）も生成に含める</label>
+          <button class="btn brand" id="btnGenerate">問題を自動生成</button>
+        </div>
+
+        <div id="genResult" style="margin-top:12px;display:none">
+          <h3>生成結果</h3>
+          <div class="qcard">
+            <div class="small muted" id="genMeta"></div>
+            <div id="genQuestion" style="margin:8px 0;font-size:15px;line-height:1.6"></div>
+            <div class="flex" id="genTags" style="gap:6px;flex-wrap:wrap"></div>
+            <div class="divider"></div>
+            <div class="flex" style="gap:8px;align-items:center">
+              <button class="btn" id="btnUseForGrading">この問題で採点へ</button>
+              <label class="pill"><input type="checkbox" id="toggleHints"> ヒントを表示</label>
+              <span id="dupNote" class="small"></span>
+            </div>
+            <div id="hintBox" class="hint" style="display:none;margin-top:10px">
+              <div><span class="caps">模範解答</span><div id="genModelAnswer" class="mono"></div></div>
+              <div class="divider"></div>
+              <div><span class="caps">解説</span><div id="genExplanation"></div></div>
+              <div class="divider"></div>
+              <div><span class="caps">出題意図</span><div id="genIntention"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <h3>ストック（最新10件）</h3>
+          <div class="list" id="stockList"></div>
+          <div class="small muted" id="stockCount"></div>
+        </div>
+      </section>
+
+      <!-- 右：採点 -->
+      <section class="card">
+        <div class="toolbar">
+          <h2>② 採点</h2>
+          <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
+        </div>
+
+        <div class="qcard">
+          <div class="small muted">対象問題</div>
+          <div id="currentQuestionText" style="margin:6px 0 8px;line-height:1.6"></div>
+          <div class="flex" style="gap:8px;align-items:center">
+            <label class="pill"><input type="checkbox" id="includeModelForGrading"> 採点に模範解答も渡す（安定化）</label>
+            <label class="pill"><input type="checkbox" id="showCurrentHints"> ヒントを表示</label>
+          </div>
+          <div id="currentHintBox" class="hint" style="display:none;margin-top:8px">
+            <div><span class="caps">模範解答</span><div id="currentModel" class="mono"></div></div>
+            <div class="divider"></div>
+            <div><span class="caps">解説</span><div id="currentExpl"></div></div>
+            <div class="divider"></div>
+            <div><span class="caps">出題意図</span><div id="currentIntn"></div></div>
+          </div>
+        </div>
+
+        <div class="flex-col" style="margin-top:10px">
+          <label>あなたの解答</label>
+          <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安）"></textarea>
+        </div>
+        <div class="flex" style="margin-top:10px">
+          <select id="gradeDifficulty">
+            <option>5点</option>
+            <option selected>10点</option>
           </select>
+          <button class="btn brand" id="btnGrade">採点する</button>
+          <button class="btn" id="btnClearAnswer">クリア</button>
         </div>
-        <div class="col-4">
-          <label>分野</label>
-          <select id="sci-domain">
-            <option value="生物">生物</option>
-            <option value="化学">化学</option>
-            <option value="地学">地学</option>
-            <option value="物理">物理</option>
-            <option value="天体">天体</option>
-          </select>
+
+        <div id="gradeResult" style="margin-top:12px;display:none">
+          <h3>採点結果</h3>
+          <div class="qcard">
+            <div id="scoreLine" class="success" style="font-weight:700"></div>
+            <div id="commentary" style="margin:6px 0 8px"></div>
+            <div class="small muted">理由</div>
+            <ul id="reasons" style="margin-top:4px"></ul>
+            <div class="divider"></div>
+            <div class="small muted">参考：模範解答</div>
+            <div id="gradedModel" class="mono"></div>
+          </div>
         </div>
-        <div class="col-4">
-          <label>難易度</label>
-          <select id="difficulty-science">
-            <option value="5">5点問題（基礎〜標準）</option>
-            <option value="10">10点問題（標準〜やや発展）</option>
-            <option value="満点">満点レベル（観点統合・根拠要求）</option>
-          </select>
-        </div>
-        <div class="col-12">
-          <label>トピック（任意：例「光合成」「イオン」「台風」など）</label>
-          <input id="sci-topic" type="text" placeholder="例：光合成" />
-        </div>
-        <div class="col-6">
-          <label>出題モード</label>
-          <select id="mode-science">
-            <option value="auto">自動生成</option>
-            <option value="stock-auto">ストックから出題（自動）</option>
-            <option value="manual">ストックから出題（手動プリセット）</option>
-          </select>
-        </div>
-        <div class="col-12" id="manual-area-science" style="display:none;">
-          <label>手動プリセット問題（そのまま出題に使用）</label>
-          <textarea id="manual-text-science" placeholder="（例）問題: ……&#10;想定解答: ……&#10;出題意図: ……&#10;模範解答の観点: ……"></textarea>
-        </div>
-      </div>
+      </section>
     </div>
+  </main>
 
-    <!-- 実行ボタン -->
-    <div class="row" style="margin: 12px 0;">
-      <button class="btn" id="btn-generate">問題を生成</button>
-      <button class="btn secondary" id="btn-reset">形式履歴をリセット</button>
-      <button class="btn secondary" id="btn-open-stock">ストックを見る</button>
-      <span class="muted"><span class="badge">注意</span> 初回は数秒かかることがあります。</span>
-    </div>
-
-    <!-- 出題結果 -->
-    <div class="card">
-      <h3>生成された問題</h3>
-      <pre id="question-out">（ここに問題が表示されます）</pre>
-
-      <!-- 想定解答の表示トグル -->
-      <div class="row" style="margin:8px 0;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-          <input type="checkbox" id="toggle-answer" />
-          想定解答を表示（教師用）
-        </label>
-      </div>
-
-      <!-- ヒント（開閉） -->
-      <details class="hints" id="hints" style="display:none;">
-        <summary>ヒント（想定解答・出題意図・観点）を表示</summary>
-        <div class="hint-content">
-          <div id="hint-answer-block"><b>想定解答</b><div><pre id="hint-answer"></pre></div></div>
-          <div><b>出題意図</b><div><pre id="hint-intent"></pre></div></div>
-          <div><b>模範解答の観点</b><ul id="hint-points"></ul></div>
-        </div>
-      </details>
-    </div>
-
-    <!-- 採点 -->
-    <div class="card">
-      <h3>採点</h3>
-      <label>生徒の解答（30〜80字目安）</label>
-      <textarea id="answer"></textarea>
-      <div class="row" style="margin-top:8px;">
-        <button class="btn" id="btn-grade">採点する</button>
-        <span class="muted">出題直後の問題をもとに採点します。</span>
-      </div>
-      <div style="margin-top:12px;">
-        <div id="grade-out"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ストック一覧モーダル -->
-  <div class="modal" id="stock-modal" aria-hidden="true">
-    <div class="panel">
-      <div class="row" style="justify-content:space-between;">
-        <h3 style="margin:0;">ストック一覧</h3>
-        <button class="btn secondary" id="btn-close-stock">閉じる</button>
-      </div>
-      <div class="row" style="margin:8px 0;">
-        <button class="btn secondary" id="btn-load-social">社会</button>
-        <button class="btn secondary" id="btn-load-science">理科</button>
-      </div>
-      <div id="stock-list"></div>
-    </div>
-  </div>
+  <div class="toast" id="toast"></div>
 
   <script>
-    // タブ切り替え
-    const tabSocial = document.getElementById("tab-social");
-    const tabScience = document.getElementById("tab-science");
-    const panelSocial = document.getElementById("panel-social");
-    const panelScience = document.getElementById("panel-science");
+    // ---- 設定の永続化 ----
+    const $ = (q)=>document.querySelector(q);
+    const cfg = {
+      get baseUrl(){ return localStorage.getItem('baseUrl') || ''; },
+      set baseUrl(v){ localStorage.setItem('baseUrl', v||''); },
+      get accessCode(){ return localStorage.getItem('accessCode') || ''; },
+      set accessCode(v){ localStorage.setItem('accessCode', v||''); },
+      endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
+    };
 
-    tabSocial.addEventListener("click", () => {
-      tabSocial.classList.add("active"); tabScience.classList.remove("active");
-      panelSocial.style.display = ""; panelScience.style.display = "none";
-    });
-    tabScience.addEventListener("click", () => {
-      tabScience.classList.add("active"); tabSocial.classList.remove("active");
-      panelScience.style.display = ""; panelSocial.style.display = "none";
-    });
-
-    // モード切替で手動エリアの出し分け
-    const modeSocial = document.getElementById("mode-social");
-    const manualAreaSocial = document.getElementById("manual-area-social");
-    modeSocial.addEventListener("change", () => {
-      manualAreaSocial.style.display = modeSocial.value === "manual" ? "" : "none";
-    });
-
-    const modeScience = document.getElementById("mode-science");
-    const manualAreaScience = document.getElementById("manual-area-science");
-    modeScience.addEventListener("change", () => {
-      manualAreaScience.style.display = modeScience.value === "manual" ? "" : "none";
-    });
-
-    // 想定解答の任意表示トグル（ローカル保存つき）
-    const toggleAns = document.getElementById("toggle-answer");
-    const hintAnswerBlock = document.getElementById("hint-answer-block");
-    let showAnswer = JSON.parse(localStorage.getItem("showAnswer") || "false");
-    if (toggleAns) toggleAns.checked = showAnswer;
-
-    function applyAnswerVisibility(hasAnswer){
-      if (!hasAnswer){ hintAnswerBlock.style.display = "none"; return; }
-      hintAnswerBlock.style.display = toggleAns.checked ? "" : "none";
+    // ---- 共通Fetch ----
+    async function apiGet(path){
+      const headers = {};
+      if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
+      const res = await fetch(cfg.endpoint(path), {headers});
+      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
     }
-    if (toggleAns){
-      toggleAns.addEventListener("change", () => {
-        localStorage.setItem("showAnswer", JSON.stringify(toggleAns.checked));
-        const has = (document.getElementById("hint-answer").textContent || "").trim().length > 0;
-        applyAnswerVisibility(has);
-      });
-    }
-
-    // 直近の生成結果（採点・再挑戦用に保持）
-    let lastQuestionText = "";
-    let lastQuestionId = "";
-    let lastCategory = "";
-
-    // セクション抽出
-    function extractSection(text, label){
-      const re = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*([\\s\\S]*?)(?=\\n(?:問題:|想定解答:|出題意図:|模範解答の観点:)|$)");
-      const m = text.match(re);
-      return m ? m[1].trim() : "";
-    }
-    function parseGenerated(text){
-      const q = extractSection(text, "問題:");
-      const a = extractSection(text, "想定解答:");
-      const i = extractSection(text, "出題意図:");
-      const pRaw = extractSection(text, "模範解答の観点:");
-      const points = pRaw ? pRaw.split(/\n|・|-/).map(s=>s.trim()).filter(Boolean) : [];
-      return {question:q || text, answer:a, intent:i, points};
-    }
-
-    // 簡易必須チェック
-    function assertNonEmpty(value, msg){
-      if (!value || !value.trim()){
-        alert(msg);
+    async function apiPost(path, body){
+      const headers = {'Content-Type':'application/json'};
+      if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
+      const res = await fetch(cfg.endpoint(path), {method:'POST', headers, body: JSON.stringify(body||{})});
+      if(!res.ok){
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
         throw new Error(msg);
       }
+      return res.json();
     }
 
-    // 生成
-    document.getElementById("btn-generate").addEventListener("click", async () => {
-      const isSocial = tabSocial.classList.contains("active");
-      let payload = { category: isSocial ? "社会" : "理科" };
+    function toast(msg, ok=true){
+      const t = $('#toast');
+      t.textContent = msg;
+      t.style.background = ok ? '#111827' : '#ef4444';
+      t.classList.add('show');
+      setTimeout(()=>t.classList.remove('show'), 2200);
+    }
 
-      if (isSocial) {
-        payload.branch = document.getElementById("social-branch").value;
-        payload.unit_or_era = document.getElementById("social-unit").value || "弥生時代";
-        payload.difficulty = document.getElementById("difficulty-social").value;
-        payload.mode = document.getElementById("mode-social").value;
-        if (payload.mode === "manual") {
-          payload.manual_text = document.getElementById("manual-text-social").value || "";
-          assertNonEmpty(payload.manual_text, "手動プリセットが空です。");
-        }
-      } else {
-        payload.grade = document.getElementById("sci-grade").value;
-        payload.domain = document.getElementById("sci-domain").value;
-        payload.topic = document.getElementById("sci-topic").value || "";
-        payload.difficulty = document.getElementById("difficulty-science").value;
-        payload.mode = document.getElementById("mode-science").value;
-        if (payload.mode === "manual") {
-          payload.manual_text = document.getElementById("manual-text-science").value || "";
-          assertNonEmpty(payload.manual_text, "手動プリセットが空です。");
-        }
+    // ---- UI状態 ----
+    let subject = '社会';
+    let currentItem = null;      // {question, model_answer, ...}
+    let generatedRaw = null;     // 生成APIの生データ（duplicate情報含む）
+
+    // ---- 設定UI ----
+    function loadSettings(){
+      $('#baseUrl').value = cfg.baseUrl;
+      $('#accessCode').value = cfg.accessCode;
+    }
+    function saveSettings(){
+      cfg.baseUrl = $('#baseUrl').value.trim();
+      cfg.accessCode = $('#accessCode').value.trim();
+      $('#statusLine').textContent = '保存しました';
+      setTimeout(()=>$('#statusLine').textContent='', 1500);
+    }
+
+    // ---- 初期化 ----
+    async function boot(){
+      loadSettings();
+      // モデル表示
+      try{
+        const r = await apiGet('/api/model');
+        $('#modelTag').textContent = `model: ${r.model}`;
+      }catch(e){
+        $('#modelTag').textContent = 'model: (取得失敗)';
       }
+      // ストック一覧
+      await refreshStock();
+      // 既存状態
+      updateSubjectTabs();
+      $('#settingsCard').style.display = 'none';
+    }
 
-      try {
-        const res = await fetch("/api/generate_question", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+    // ---- 生成UIロジック ----
+    function updateSubjectTabs(){
+      document.querySelectorAll('.tab').forEach(el=>{
+        el.classList.toggle('active', el.dataset.subject === subject);
+      });
+      const cat = $('#category');
+      cat.innerHTML = '';
+      if(subject==='社会'){
+        ['地理','歴史'].forEach(x=>{
+          const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
         });
-        const data = await res.json();
-        if (data.ok) {
-          const parsed = parseGenerated(data.text || "");
-          document.getElementById("question-out").textContent = parsed.question || "（問題テキストが取得できませんでした）";
+        $('#gradeBox').style.display='none';
+      }else{
+        ['生物','化学','地学','物理','天体'].forEach(x=>{
+          const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
+        });
+        $('#gradeBox').style.display='';
+      }
+    }
 
-          // ヒント
-          const hints = document.getElementById("hints");
-          const hasHints = (parsed.answer || parsed.intent || (parsed.points && parsed.points.length));
-          if (hasHints){
-            document.getElementById("hint-answer").textContent = parsed.answer || "";
-            document.getElementById("hint-intent").textContent = parsed.intent || "";
-            const ul = document.getElementById("hint-points");
-            ul.innerHTML = (parsed.points||[]).map(s=>`<li>${s}</li>`).join("");
-            hints.style.display = ""; 
-            hints.open = false;
-            applyAnswerVisibility(!!parsed.answer);
-          } else {
-            hints.style.display = "none";
+    async function handleGenerate(){
+      const payload = {
+        subject,
+        category: $('#category').value,
+        grade: subject==='理科' ? $('#grade').value : '',
+        difficulty: $('#difficulty').value,
+        genre_hint: $('#genreHint').value,
+        avoid_topics: $('#avoidTopics').value,
+        include_hints: $('#includeHints').checked,
+        length_hint: $('#lengthHint').value || '30〜80字程度',
+      };
+      try{
+        const res = await apiPost('/api/generate_question', payload);
+        generatedRaw = res;
+        let item = res.item || res.generated || {};
+        if(res.item && res.item.question){
+          // 保存済み（自動でストックに入る）
+          currentItem = res.item;
+        }else{
+          currentItem = item;
+        }
+        renderGenerated(item, res.duplicate_of);
+        await refreshStock();
+        toast('問題を生成しました');
+      }catch(e){
+        console.error(e);
+        toast('生成に失敗しました: ' + e.message, false);
+      }
+    }
+
+    function renderGenerated(item, dupOf){
+      $('#genResult').style.display = '';
+      $('#genQuestion').textContent = item.question || '(empty)';
+      $('#genModelAnswer').textContent = item.model_answer || '';
+      $('#genExplanation').textContent = item.explanation || '';
+      $('#genIntention').textContent = item.intention || '';
+      const tags = item.tags || [];
+      const meta = [];
+      if(item.subject) meta.push(item.subject);
+      if(item.category) meta.push(item.category);
+      if(item.grade) meta.push(item.grade);
+      if(item.difficulty) meta.push(item.difficulty);
+      $('#genMeta').textContent = meta.join(' / ');
+      const tagsBox = $('#genTags'); tagsBox.innerHTML='';
+      tags.forEach(t=>{
+        const s=document.createElement('span'); s.className='tag'; s.textContent=t; tagsBox.appendChild(s);
+      });
+      $('#dupNote').textContent = dupOf ? `（注）ストック内の類似: ${dupOf}` : '';
+      $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
+    }
+
+    // ---- ストック一覧 ----
+    async function refreshStock(){
+      try{
+        const r = await apiGet('/api/stock/list');
+        const list = $('#stockList'); list.innerHTML='';
+        r.items.forEach(it=>{
+          const div=document.createElement('div'); div.className='item';
+          const top=document.createElement('div');
+          top.innerHTML = `<div class="small muted">${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}</div>`;
+          const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
+          const actions=document.createElement('div'); actions.className='flex';
+          const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
+          useBtn.onclick=()=>{ useStock(it); };
+          actions.appendChild(useBtn);
+          if(cfg.accessCode){
+            const del=document.createElement('button'); del.className='btn err'; del.textContent='削除';
+            del.onclick=()=>deleteStock(it.id);
+            actions.appendChild(del);
           }
-
-          lastQuestionText = data.text;
-          lastQuestionId = data.id || "";
-          lastCategory = (data.meta && data.meta.category) || payload.category || "";
-
-        } else {
-          document.getElementById("question-out").textContent = "エラー: " + (data.error || "不明なエラー");
-          document.getElementById("hints").style.display = "none";
-        }
-      } catch (e) {
-        document.getElementById("question-out").textContent = "通信エラー: " + e;
-        document.getElementById("hints").style.display = "none";
-      }
-    });
-
-    // 採点
-    document.getElementById("btn-grade").addEventListener("click", async () => {
-      const answer = document.getElementById("answer").value || "";
-      if (!lastQuestionText){
-        document.getElementById("grade-out").innerHTML = "<span class='muted'>先に問題を生成してください。</span>";
-        return;
-      }
-      try{
-        const res = await fetch("/api/grade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: lastQuestionText, answer, question_id: lastQuestionId, category: lastCategory }),
+          div.appendChild(top); div.appendChild(q); div.appendChild(actions);
+          list.appendChild(div);
         });
-        const data = await res.json();
-        if (data.ok){
-          document.getElementById("grade-out").innerHTML =
-            `<div class="row"><div class="badge">score</div> <b>${data.score}/10</b></div>
-             <div class="muted" style="margin-top:6px;">${data.summary || ""}</div>
-             <div style="margin-top:8px;"><b>理由</b><ul>${(data.reasons || []).map(r=>`<li>${r}</li>`).join("")}</ul></div>
-             <div><b>模範解答</b><div><pre>${data.model_answer || ""}</pre></div></div>
-             <div><b>改善ポイント</b><ul>${(data.points || []).map(p=>`<li>${p}</li>`).join("")}</ul></div>`;
-        } else {
-          document.getElementById("grade-out").textContent = "エラー: " + (data.error || "採点に失敗しました");
-        }
-      } catch(e){
-        document.getElementById("grade-out").textContent = "通信エラー: " + e;
-      }
-    });
-
-    // 履歴リセット
-    document.getElementById("btn-reset").addEventListener("click", async () => {
-      try { await fetch("/api/reset_session", { method: "POST" }); } catch {}
-    });
-
-    // ===== ストックUI =====
-    const stockModal = document.getElementById("stock-modal");
-    const stockList = document.getElementById("stock-list");
-
-    document.getElementById("btn-open-stock").addEventListener("click", async ()=>{
-      stockModal.style.display = "flex";
-      loadStock("社会");
-    });
-    document.getElementById("btn-close-stock").addEventListener("click", ()=>{
-      stockModal.style.display = "none";
-      stockList.innerHTML = "";
-    });
-    document.getElementById("btn-load-social").addEventListener("click", ()=> loadStock("社会"));
-    document.getElementById("btn-load-science").addEventListener("click", ()=> loadStock("理科"));
-
-    async function loadStock(category){
-      stockList.innerHTML = "<div class='muted'>読み込み中…</div>";
-      try{
-        const url = category ? `/api/stock/list?category=${encodeURIComponent(category)}` : "/api/stock/list";
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data.ok) throw new Error("load failed");
-
-        let items = [];
-        if (category==="社会") items = (data.data.social||[]);
-        else if (category==="理科") items = (data.data.science||[]);
-        else items = (data.data.social||[]).concat(data.data.science||[]);
-
-        if (!items.length){
-          stockList.innerHTML = "<div class='muted'>ストックがありません。</div>";
-          return;
-        }
-
-        stockList.innerHTML = items.map(it=>{
-          const txt = (it.text||"").split("\n").slice(0,3).join("\n");
-          return `
-            <div class="stock-item">
-              <div class="muted">${it.date || ""} / ${it.meta?.category || ""}</div>
-              <pre style="margin:6px 0 0 0;">${escapeHtml(txt)}</pre>
-              <div class="stock-actions">
-                <button class="btn" data-act="use" data-id="${it.id}">出題</button>
-                <button class="btn secondary" data-act="del" data-id="${it.id}">削除</button>
-              </div>
-            </div>`;
-        }).join("");
-
-        // ボタンイベント
-        stockList.querySelectorAll("button[data-act]").forEach(btn=>{
-          btn.addEventListener("click", async ()=>{
-            const id = btn.getAttribute("data-id");
-            const act = btn.getAttribute("data-act");
-            if (act==="use"){
-              await useStock(id);
-              stockModal.style.display = "none";
-            } else if (act==="del"){
-              if (!confirm("この問題を削除しますか？")) return;
-              await deleteStock(id);
-              await loadStock(category);
-            }
-          });
-        });
-
-      } catch(e){
-        stockList.innerHTML = "<div class='muted'>読み込みに失敗しました。</div>";
+        $('#stockCount').textContent = `件数: ${r.count} / 上限 ${r.limit}`;
+      }catch(e){
+        console.error(e);
+        $('#stockList').innerHTML = `<div class="small danger">取得に失敗: ${e.message}</div>`;
       }
     }
-
-    async function useStock(id){
-      try{
-        const res = await fetch("/api/retry", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id })
-        });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || "retry failed");
-
-        const parsed = parseGenerated(data.text || "");
-        document.getElementById("question-out").textContent = parsed.question || "（問題テキストが取得できませんでした）";
-
-        const hints = document.getElementById("hints");
-        const hasHints = (parsed.answer || parsed.intent || (parsed.points && parsed.points.length));
-        if (hasHints){
-          document.getElementById("hint-answer").textContent = parsed.answer || "";
-          document.getElementById("hint-intent").textContent = parsed.intent || "";
-          const ul = document.getElementById("hint-points");
-          ul.innerHTML = (parsed.points||[]).map(s=>`<li>${s}</li>`).join("");
-          hints.style.display = ""; 
-          hints.open = false;
-          applyAnswerVisibility(!!parsed.answer);
-        } else {
-          hints.style.display = "none";
-        }
-        lastQuestionText = data.text;
-        lastQuestionId = data.id || id;
-        lastCategory = (data.meta && data.meta.category) || "";
-
-      } catch(e){
-        alert("ストックの読み込みに失敗しました。");
-      }
-    }
-
     async function deleteStock(id){
+      if(!confirm('この問題を削除しますか？')) return;
       try{
-        const res = await fetch("/api/stock/delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id })
+        await apiPost('/api/stock/delete', {id});
+        toast('削除しました');
+        await refreshStock();
+      }catch(e){
+        toast('削除に失敗: ' + e.message, false);
+      }
+    }
+    function useStock(it){
+      currentItem = it;
+      $('#currentQuestionText').textContent = it.question || '';
+      $('#currentModel').textContent = it.model_answer || '';
+      $('#currentExpl').textContent = it.explanation || '';
+      $('#currentIntn').textContent = it.intention || '';
+      $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
+      window.scrollTo({top:0,behavior:'smooth'});
+      toast('採点対象にセットしました');
+    }
+
+    // ---- 採点 ----
+    async function handleGrade(){
+      if(!currentItem || !currentItem.question){
+        toast('先に問題を選ぶか生成してください', false); return;
+      }
+      const body = {
+        question: currentItem.question,
+        student_answer: $('#studentAnswer').value || '',
+        difficulty: $('#gradeDifficulty').value
+      };
+      if($('#includeModelForGrading').checked && currentItem.model_answer){
+        body.model_answer = currentItem.model_answer;
+      }
+      if(!body.student_answer.trim()){
+        toast('解答を入力してください', false); return;
+      }
+      try{
+        const r = await apiPost('/api/grade_answer', body);
+        $('#gradeResult').style.display='';
+        $('#scoreLine').textContent = `スコア: 10点中${r.score}点`;
+        $('#commentary').textContent = r.commentary || '';
+        $('#gradedModel').textContent = r.model_answer || '';
+        const ul = $('#reasons'); ul.innerHTML='';
+        (r.reasons||[]).forEach(s=>{
+          const li=document.createElement('li'); li.textContent=s; ul.appendChild(li);
         });
-        const data = await res.json();
-        if (!data.ok) alert("削除に失敗しました。");
-      } catch(e){
-        alert("削除に失敗しました。");
+        toast('採点しました');
+      }catch(e){
+        console.error(e);
+        toast('採点に失敗: ' + e.message, false);
       }
     }
 
-    function escapeHtml(str){
-      return (str||"").replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+    // ---- エクスポート（ヘッダー付きDL）----
+    async function downloadEndpoint(path, filename){
+      const headers = {};
+      if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
+      const res = await fetch(cfg.endpoint(path), {headers});
+      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
     }
+
+    // ---- イベント結線 ----
+    document.addEventListener('click', (e)=>{
+      if(e.target.closest('.tab')){
+        subject = e.target.closest('.tab').dataset.subject;
+        updateSubjectTabs();
+      }
+    });
+    $('#btnGenerate').onclick = handleGenerate;
+    $('#toggleHints').onchange = ()=> $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
+    $('#btnUseForGrading').onclick = ()=>{
+      if(!generatedRaw){ toast('先に生成してください', false); return; }
+      // 生成結果 or duplicate の元を採点にセット
+      const item = (generatedRaw.item || generatedRaw.generated);
+      useStock(item);
+    };
+    $('#showCurrentHints').onchange = ()=> $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
+    $('#btnGrade').onclick = handleGrade;
+    $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; $('#gradeResult').style.display='none'; };
+
+    $('#btnExportJson').onclick = ()=> downloadEndpoint('/api/export/stocks.json', 'stocks.json').catch(e=>toast('DL失敗: '+e.message,false));
+    $('#btnExportCsv').onclick = ()=> downloadEndpoint('/api/export/stocks.csv', 'stocks.csv').catch(e=>toast('DL失敗: '+e.message,false));
+    $('#btnExportGrading').onclick = ()=> downloadEndpoint('/api/export/grading.jsonl', 'grading.jsonl').catch(e=>toast('DL失敗: '+e.message,false));
+
+    $('#btnSettings').onclick = ()=> $('#settingsCard').style.display='';
+    $('#btnHideSettings').onclick = ()=> $('#settingsCard').style.display='none';
+    $('#btnSaveSettings').onclick = ()=> { saveSettings(); boot(); };
+    $('#btnReload').onclick = boot;
+
+    // 起動
+    boot();
   </script>
 </body>
 </html>
