@@ -1,30 +1,30 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>記述添削アプリ（テスト版）</title>
   <link rel="stylesheet" href="/static/style.css" />
   <style>
     :root{
-      --text-dark:#111827;           /* ほぼ黒 */
-      --muted:#6b7280;               /* グレー */
-      --card:#ffffff;                /* カード背景 */
-      --border:#e5e7eb;              /* 枠線 */
-      --pastel-bg:#f5f3ff;           /* うす紫（ラベンダー） */
-      --pastel-accent:#efeaff;       /* さらに薄い紫(少し明るめに) */
-      --pastel-accent-strong:#c4b5fd;/* 枠に使う淡い紫 */
-      --primary:#a78bfa;             /* ボタンのやさしい紫 */
-      --primary-strong:#7c3aed;      /* 濃い紫（境界・ホバー） */
+      --text-dark:#111827;
+      --muted:#6b7280;
+      --card:#ffffff;
+      --border:#e5e7eb;
+      --pastel-bg:#f5f3ff;
+      --pastel-accent:#e9d5ff;       /* 共有いただいたCSSに合わせる */
+      --pastel-accent-strong:#c4b5fd;
+      --primary:#a78bfa;
+      --primary-strong:#7c3aed;
     }
-    body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; line-height:1.6; color:var(--text-dark); background:#fff; }
+    body{ line-height:1.6; color:var(--text-dark); background:#fff; }
     .container{ max-width:980px; margin:24px auto; padding:0 16px; }
     h1{ margin-bottom:8px; }
     .desc{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-strong); padding:12px; border-radius:12px; margin:12px 0 24px; }
 
     /* タブ */
     .tabs{ display:flex; gap:8px; margin-bottom:12px; }
-    .tab-btn{ padding:8px 12px; border:1px solid var(--pastel-accent-strong); background:var(--pastel-bg); border-radius:10px; cursor:pointer; color:var(--text-dark) !important; }
+    .tab-btn{ padding:8px 12px; border:1px solid var(--pastel-accent-strong); background:var(--pastel-bg); border-radius:10px; cursor:pointer; color:var(--text-dark) !important; min-height:42px; }
     .tab-btn:hover{ background:var(--pastel-accent); }
     .tab-btn.active{ background:var(--primary); color:#fff !important; border-color:var(--primary-strong); }
 
@@ -37,13 +37,11 @@
     @media (max-width: 720px){
       .grid{ grid-template-columns:1fr; }
       .col-4, .col-6, .col-12{ grid-column:1 / -1; }
+      body{ line-height:1.7; }           /* スマホ読みやすさUP */
+      .row{ gap:10px; }
     }
 
-    label{ font-size:14px; color:#374151; display:block; margin-bottom:4px; }
-    select, input[type="text"], textarea{ width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:var(--text-dark); }
-    textarea{ min-height:120px; }
-
-    .card{ border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--card); }
+    /* ボタン（共有CSSと整合） */
     .btn{ padding:10px 16px; border-radius:10px; border:1px solid var(--primary-strong); background:var(--primary); color:#fff; cursor:pointer; }
     .btn:hover{ background:var(--primary-strong); }
     .btn.secondary{ background:#fff; color:var(--primary-strong); border:1px solid var(--primary-strong); }
@@ -56,14 +54,14 @@
 
     /* ヒント（想定解答/出題意図/観点） */
     details.hints{ background:var(--pastel-accent); border:1px solid var(--pastel-accent-strong); border-radius:12px; padding:10px 14px; }
-    details.hints > summary{ cursor:pointer; font-weight:600; color:#4c1d95; list-style:none; }
+    details.hints > summary{ cursor:pointer; font-weight:600; color:#4c1d95; list-style:none; padding:6px 0; }
     details.hints > summary::-webkit-details-marker{ display:none; }
     .hint-content{ margin-top:8px; }
     .badge{ display:inline-block; padding:2px 6px; border:1px solid var(--pastel-accent-strong); border-radius:6px; font-size:12px; color:#4b5563; background:#faf5ff; }
 
-    /* ストック一覧の簡易モーダル */
+    /* ストック一覧の簡易モーダル（見た目は現状テイスト踏襲） */
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
-    .modal .panel{ width:min(900px, 92vw); max-height:80vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
+    .modal .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
     .stock-item{ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
     .stock-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   </style>
@@ -185,7 +183,7 @@
       <h3>生成された問題</h3>
       <pre id="question-out">（ここに問題が表示されます）</pre>
 
-      <!-- ▼ 想定解答の表示トグル -->
+      <!-- 想定解答の表示トグル -->
       <div class="row" style="margin:8px 0;">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
           <input type="checkbox" id="toggle-answer" />
@@ -270,10 +268,7 @@
     if (toggleAns) toggleAns.checked = showAnswer;
 
     function applyAnswerVisibility(hasAnswer){
-      if (!hasAnswer){
-        hintAnswerBlock.style.display = "none";
-        return;
-      }
+      if (!hasAnswer){ hintAnswerBlock.style.display = "none"; return; }
       hintAnswerBlock.style.display = toggleAns.checked ? "" : "none";
     }
     if (toggleAns){
@@ -415,6 +410,7 @@
     // ===== ストックUI =====
     const stockModal = document.getElementById("stock-modal");
     const stockList = document.getElementById("stock-list");
+
     document.getElementById("btn-open-stock").addEventListener("click", async ()=>{
       stockModal.style.display = "flex";
       loadStock("社会");

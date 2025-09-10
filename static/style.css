@@ -1,5 +1,5 @@
 /* =========================
-   static/style.css  (修正版)
+   static/style.css  (修正版 最終)
    ※ レイアウトは変更しません
    ========================= */
 
@@ -20,7 +20,7 @@ html, body { margin: 0; padding: 0; }
   --primary:#a78bfa;
   --primary-strong:#7c3aed;
 
-  /* 以前の壊れた変数（例: --danger-bg:#||||）を修正して定義 */
+  /* 以前の壊れた変数を修正して定義 */
   --success:#22c55e;
   --success-bg:#eafaf0;
   --danger:#ef4444;
@@ -85,6 +85,7 @@ textarea{
   background: #fff;           /* 黒背景化対策 */
   color: var(--text-dark);     /* 白文字固定の古い指定を上書き */
   outline: none;
+  font-size: 16px;             /* iOSの自動ズーム防止 */
 }
 
 textarea{ min-height: 120px; }
@@ -108,7 +109,7 @@ textarea:focus{
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
 }
 
-/* ボタン（index側と整合。!important は使わない） */
+/* ボタン（index側と整合） */
 .btn{
   padding: 10px 16px;
   border-radius: 10px;
@@ -146,8 +147,15 @@ details.hints > summary{
   font-weight: 600;
   color: #4c1d95;
   list-style: none;
+  padding: 6px 0; /* タップしやすく */
 }
 details.hints > summary::-webkit-details-marker{ display: none; }
+
+/* モーダル（indexのUIに合わせた補助。色味は既存変数使用） */
+.modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
+.modal .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
+.stock-item{ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
+.stock-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
 
 /* ---------- ここから下は「意図せぬ全体反転」を防ぐ保護 ---------- */
 
@@ -177,4 +185,10 @@ select, input, textarea, button{
 @media print{
   body{ background: #fff; }
   .card{ box-shadow: none; }
+}
+
+/* モバイル細かな調整（レイアウトは変えない） */
+@media (max-width: 720px){
+  body{ line-height: 1.7; }
+  .row{ gap: 10px; }
 }
