@@ -1,8 +1,10 @@
-.env
-.env
-get-pip.py
 __pycache__/
 *.pyc
+*.log
+.env
+.env.*
 .venv/
 venv/
 .DS_Store
+.vscode/
+*.egg-info/
