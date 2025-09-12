@@ -256,7 +256,13 @@
       const headers = {};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {headers});
-      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if(!res.ok){
+        // ACCESS_CODEのヒントを付与（403のとき）
+        if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
+        throw new Error(msg);
+      }
       return res.json();
     }
     async function apiPost(path, body){
@@ -264,6 +270,7 @@
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {method:'POST', headers, body: JSON.stringify(body||{})});
       if(!res.ok){
+        if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
         let msg = `${res.status} ${res.statusText}`;
         try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
         throw new Error(msg);
@@ -296,6 +303,22 @@
       setTimeout(()=>$('#statusLine').textContent='', 1500);
     }
 
+    // ---- 学年とカテゴリの整合（理科：天体は中3のみ）----
+    function applyScienceConstraints(){
+      if(subject!=='理科') return;
+      const g = $('#grade').value;
+      const cat = $('#category');
+      // 「天体」オプションの有効/無効と自動切替
+      [...cat.options].forEach(opt=>{
+        if(opt.textContent==='天体'){
+          opt.disabled = (g !== '中3');
+          if(opt.disabled && cat.value==='天体'){
+            cat.value = '地学';
+          }
+        }
+      });
+    }
+
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
@@ -310,6 +333,7 @@
       await refreshStock();
       // 既存状態
       updateSubjectTabs();
+      applyScienceConstraints();
       $('#settingsCard').style.display = 'none';
     }
 
@@ -330,6 +354,7 @@
           const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
         });
         $('#gradeBox').style.display='';
+        applyScienceConstraints(); // 理科切替直後にも適用
       }
     }
 
@@ -349,7 +374,6 @@
         generatedRaw = res;
         let item = res.item || res.generated || {};
         if(res.item && res.item.question){
-          // 保存済み（自動でストックに入る）
           currentItem = res.item;
         }else{
           currentItem = item;
@@ -486,11 +510,13 @@
         updateSubjectTabs();
       }
     });
+    // 学年変更時にも制約適用（UIはそのまま）
+    $('#grade').onchange = applyScienceConstraints;
+
     $('#btnGenerate').onclick = handleGenerate;
     $('#toggleHints').onchange = ()=> $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
     $('#btnUseForGrading').onclick = ()=>{
       if(!generatedRaw){ toast('先に生成してください', false); return; }
-      // 生成結果 or duplicate の元を採点にセット
       const item = (generatedRaw.item || generatedRaw.generated);
       useStock(item);
     };

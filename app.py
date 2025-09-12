@@ -8,6 +8,7 @@
 # - 改善: 入力バリデーション, JSON強制, レート制限, 500/404ハンドラ, ディスク使用状況, メトリクス
 # - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
 # - 追加: /api/stock/clear /api/stock/import /logs.zip /status に OpenAI 疎通
+# - 新規: /api/stock/search /api/stock/random /api/model(POST) / NOVELTY_THRESHOLD / MAX_TOKENS_*
 # - 注意: UI 側の fetch は /api/* を呼び出す想定（HTMLは変更不要）
 
 import os
@@ -19,6 +20,7 @@ import time
 import uuid
 import shutil
 import zipfile
+import random
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
@@ -40,15 +42,14 @@ except Exception:
 # =========================
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
-# 投稿サイズの安全弁（必要に応じて拡張）
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000))  # 1MB
 
-# CORS: ALLOWED_ORIGIN はカンマ区切りで複数可（例: "https://flask-auto-grader.onrender.com,https://example.com"）
+# CORS
 ALLOWED_ORIGIN_RAW = os.getenv("ALLOWED_ORIGIN", "")
 CORS_ORIGINS = [o.strip() for o in ALLOWED_ORIGIN_RAW.split(",") if o.strip()]
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS or None}}, supports_credentials=True)
 
-# 永続保存先（Persistent Disk 配下推奨）
+# 永続保存先
 DATA_DIR = os.getenv("DATA_DIR", "/var/tmp/eichan")
 DATA = Path(DATA_DIR)
 STOCK_DIR = DATA / "stocks"     # 1問1ファイル(JSON)
@@ -61,7 +62,6 @@ for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR):
 _previous_candidates = [Path("/var/data/cyopa"), Path("/var/tmp/cyopa")]
 def _dir_nonempty(p: Path) -> bool:
     return p.exists() and any(p.iterdir())
-
 if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_nonempty(UPLOAD_DIR):
     for src in _previous_candidates:
         if _dir_nonempty(src):
@@ -76,6 +76,9 @@ if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_none
 ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
+NOVELTY_THRESHOLD = float(os.getenv("NOVELTY_THRESHOLD", "0.92"))
+MAX_TOKENS_GEN = int(os.getenv("MAX_TOKENS_GEN", "600"))
+MAX_TOKENS_GRADE = int(os.getenv("MAX_TOKENS_GRADE", "600"))
 
 # レート制限（IPごと/分あたり）
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
@@ -84,8 +87,12 @@ _rate_bucket: Dict[str, List[float]] = {}
 # 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
 ALLOWED_CATEGORIES = {"地理", "歴史", "生物", "化学", "地学", "物理", "天体"}
+ALLOWED_CAT_BY_SUBJECT = {
+    "社会": {"地理", "歴史"},
+    "理科": {"生物", "化学", "地学", "物理", "天体"},
+}
 ALLOWED_GRADES = {"中1", "中2", "中3"}
-ALLOWED_DIFFICULTY = {"5点", "10点"}
+ALLOWED_DIFFICULTY = {"5点", "10点", "満点"}  # 生成時の難易度ヒント用（採点は常に10点満点表示）
 
 # メトリクス
 METRICS = {
@@ -120,11 +127,12 @@ def append_jsonl(path: Path, record: Dict[str, Any]):
 def normalize_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
-def is_similar(a: str, b: str, threshold: float = 0.92) -> bool:
+def is_similar(a: str, b: str, threshold: Optional[float] = None) -> bool:
     a, b = normalize_text(a), normalize_text(b)
     if not a or not b:
         return False
-    return SequenceMatcher(None, a, b).ratio() >= threshold
+    t = threshold if isinstance(threshold, (float, int)) else NOVELTY_THRESHOLD
+    return SequenceMatcher(None, a, b).ratio() >= float(t)
 
 def list_stock_files() -> List[Path]:
     return sorted([p for p in STOCK_DIR.glob("*.json")], key=lambda p: p.stat().st_mtime)
@@ -136,7 +144,7 @@ def load_stock_item(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 def current_stocks() -> List[Dict[str, Any]]:
-    items = []
+    items: List[Dict[str, Any]] = []
     for p in list_stock_files():
         obj = load_stock_item(p)
         if obj:
@@ -165,6 +173,17 @@ def find_duplicate_in_stocks(question_text: str) -> Optional[Dict[str, Any]]:
         if is_similar(it.get("question", ""), question_text):
             return it
     return None
+
+def recent_tags(limit: int = 8) -> List[str]:
+    tags: List[str] = []
+    for it in current_stocks()[: 30]:  # 直近30件から収集
+        for t in (it.get("tags") or []):
+            nt = normalize_text(str(t))
+            if nt and nt not in tags:
+                tags.append(nt)
+            if len(tags) >= limit:
+                return tags
+    return tags
 
 def ensure_openai() -> Optional[str]:
     if client is None:
@@ -211,7 +230,6 @@ def rate_limit(fn):
         ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
         now = time.time()
         bucket = _rate_bucket.setdefault(ip, [])
-        # 60秒より前を掃除
         while bucket and (now - bucket[0] > 60.0):
             bucket.pop(0)
         if len(bucket) >= RATE_LIMIT_PER_MIN:
@@ -220,22 +238,45 @@ def rate_limit(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def _update_metrics(kind: str, ok: bool, t0: float):
+    dt = int((time.time() - t0) * 1000)
+    key = "gen" if kind == "generate" else "grade"
+    if ok:
+        METRICS[f"{key}_ok"] += 1
+    else:
+        METRICS[f"{key}_err"] += 1
+    METRICS[f"{key}_n"] += 1
+    # 移動平均（単純）
+    prev_n = max(METRICS[f"{key}_n"], 1)
+    METRICS[f"{key}_avg_ms"] = (METRICS[f"{key}_avg_ms"] * (prev_n - 1) + dt) / prev_n
+
+# =========================
+# バリデーション
+# =========================
 def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     subject = p.get("subject", "")
     if subject not in ALLOWED_SUBJECTS:
         subject = "社会"
+
     category = p.get("category", "")
-    if category not in ALLOWED_CATEGORIES:
-        category = "地理" if subject == "社会" else "生物"
+    allowed_cats = ALLOWED_CAT_BY_SUBJECT[subject]
+    if category not in allowed_cats:
+        category = ("地理" if subject == "社会" else "生物")
+
     grade = p.get("grade", "")
     if subject == "理科":
         if grade not in ALLOWED_GRADES:
             grade = "中3"
+        # 天体は中3のみ許可
+        if category == "天体" and grade != "中3":
+            category = "地学"
     else:
         grade = ""  # 社会は空でもOK
+
     difficulty = p.get("difficulty", "10点")
     if difficulty not in ALLOWED_DIFFICULTY:
         difficulty = "10点"
+
     genre_hint = normalize_text(p.get("genre_hint", ""))[:120]
     avoid = normalize_text(p.get("avoid_topics", ""))[:120]
     length_hint = normalize_text(p.get("length_hint", "30〜80字程度"))[:40]
@@ -275,7 +316,6 @@ def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str,
         _openai_ping_cache.update({"ok": False, "detail": "SDK未初期化 or APIキー未設定", "ts": now})
         return False, _openai_ping_cache["detail"], now
     try:
-        # 軽い呼び出し（一覧の先頭だけを参照）
         models = client.models.list()
         ok = bool(getattr(models, "data", None))
         _openai_ping_cache.update({"ok": ok, "detail": "ok" if ok else "no-data", "ts": now})
@@ -295,6 +335,12 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     genre_hint = payload["genre_hint"]
     avoid = payload["avoid_topics"]
     length_hint = payload["length_hint"]
+
+    # 最近のタグを避け候補に（同テーマ連発抑制）
+    recent = recent_tags()
+    if recent:
+        extra_avoid = "、".join(recent[:8])
+        avoid = f"{avoid}（直近の重複回避候補: {extra_avoid}）" if avoid else f"直近の重複回避候補: {extra_avoid}"
 
     sysprompt = (
         "あなたは中学生向けの記述式問題作成の専門家です。"
@@ -351,7 +397,6 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 # =========================
 @app.get("/")
 def root():
-    # レイアウトは index.html に委譲（UIの変更は行わない）
     return render_template("index.html")
 
 # =========================
@@ -382,7 +427,6 @@ def healthz():
 @app.get("/status")
 @require_access_code
 def status():
-    # ディスク使用状況などの簡易ステータス
     try:
         usage = shutil.disk_usage(DATA)
         disk = {"total": usage.total, "used": usage.used, "free": usage.free}
@@ -399,7 +443,9 @@ def status():
             "generate": {"ok": METRICS["gen_ok"], "err": METRICS["gen_err"], "avg_ms": round(METRICS["gen_avg_ms"], 1), "n": METRICS["gen_n"]},
             "grade":    {"ok": METRICS["grade_ok"], "err": METRICS["grade_err"], "avg_ms": round(METRICS["grade_avg_ms"], 1), "n": METRICS["grade_n"]},
         },
-        "openai": {"ok": ok, "detail": detail, "checked_at": ms_to_iso(ts * 1000)}
+        "openai": {"ok": ok, "detail": detail, "checked_at": ms_to_iso(ts * 1000)},
+        "novelty_threshold": NOVELTY_THRESHOLD,
+        "max_stock": MAX_STOCK,
     }), 200
 
 @app.get("/env-check")
@@ -416,6 +462,8 @@ def env_check():
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
         "MODEL_ID": MODEL_ID,
+        "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
+        "MAX_TOKENS_GRADE": MAX_TOKENS_GRADE,
     }), 200
 
 @app.post("/_probe-write")
@@ -433,7 +481,6 @@ def auth():
         return jsonify({"ok": True, "message": "ACCESS_CODE未設定（オープン）"})
     if code == ACCESS_CODE:
         resp = jsonify({"ok": True})
-        # UI が Cookie を利用する場合に備えた互換用（UI自体はヘッダ送信でもOK）
         resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=True)
         return resp
     return jsonify({"ok": False, "error": "invalid_code"}), 401
@@ -445,6 +492,85 @@ def auth():
 def stock_list():
     items = current_stocks()
     return jsonify({"ok": True, "items": items, "count": len(items), "limit": MAX_STOCK}), 200
+
+@app.get("/api/stock/search")
+def stock_search():
+    """簡易検索 + ページング。query params:
+       q, subject, category, grade, source, limit(=20), offset(=0)
+    """
+    q = normalize_text(request.args.get("q", ""))
+    subject = request.args.get("subject", "")
+    category = request.args.get("category", "")
+    grade = request.args.get("grade", "")
+    source = request.args.get("source", "")
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", "20"))))
+    except Exception:
+        limit = 20
+    try:
+        offset = max(0, int(request.args.get("offset", "0")))
+    except Exception:
+        offset = 0
+
+    def match(it: Dict[str, Any]) -> bool:
+        if subject and it.get("subject") != subject:
+            return False
+        if category and it.get("category") != category:
+            return False
+        if grade and it.get("grade") != grade:
+            return False
+        if source and it.get("source") != source:
+            return False
+        if q:
+            hay = " ".join([
+                it.get("question", ""), " ".join(it.get("tags") or []),
+                it.get("model_answer", ""), it.get("explanation", ""),
+                it.get("intention", "")
+            ])
+            if q.lower() not in hay.lower():
+                return False
+        return True
+
+    items = [it for it in current_stocks() if match(it)]
+    total = len(items)
+    sliced = items[offset: offset + limit]
+    return jsonify({"ok": True, "total": total, "items": sliced, "limit": limit, "offset": offset}), 200
+
+@app.get("/api/stock/random")
+def stock_random():
+    """フィルタ条件に合うストックから1件ランダムに取得。exclude_ids=カンマ区切りで除外可。"""
+    q = request.args.get("q", "")
+    subject = request.args.get("subject", "")
+    category = request.args.get("category", "")
+    grade = request.args.get("grade", "")
+    source = request.args.get("source", "")
+    exclude_ids = set([s for s in (request.args.get("exclude_ids", "") or "").split(",") if s])
+
+    # 再利用：searchのmatchロジックを簡略
+    def match(it: Dict[str, Any]) -> bool:
+        if it.get("id") in exclude_ids:
+            return False
+        if subject and it.get("subject") != subject:
+            return False
+        if category and it.get("category") != category:
+            return False
+        if grade and it.get("grade") != grade:
+            return False
+        if source and it.get("source") != source:
+            return False
+        if q and q.lower() not in (" ".join([
+            it.get("question", ""), " ".join(it.get("tags") or []),
+            it.get("model_answer", ""), it.get("explanation", ""),
+            it.get("intention", "")
+        ])).lower():
+            return False
+        return True
+
+    candidates = [it for it in current_stocks() if match(it)]
+    if not candidates:
+        return jsonify({"ok": False, "error": "no_candidates"}), 404
+    item = random.choice(candidates)
+    return jsonify({"ok": True, "item": item}), 200
 
 @app.post("/api/stock/add")
 @require_access_code
@@ -461,13 +587,24 @@ def stock_add():
     if dup:
         return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup}), 200
 
+    # 教科→カテゴリ整合チェック（任意のPOSTでも強制）
+    subject = data.get("subject", "")[:20]
+    if subject not in ALLOWED_SUBJECTS:
+        subject = ""
+    category = data.get("category", "")[:20]
+    if subject and category and category not in ALLOWED_CAT_BY_SUBJECT[subject]:
+        category = ""
+    grade = data.get("grade", "")[:10]
+    if grade and grade not in ALLOWED_GRADES:
+        grade = ""
+
     item = {
         "id": uuid.uuid4().hex,
         "question": question,
-        "subject": data.get("subject", "")[:20],
-        "category": data.get("category", "")[:20],
-        "grade": data.get("grade", "")[:10],
-        "difficulty": data.get("difficulty", "10点")[:10],
+        "subject": subject,
+        "category": category,
+        "grade": grade,
+        "difficulty": (data.get("difficulty", "10点") if data.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
         "tags": (data.get("tags", []) if isinstance(data.get("tags", []), list) else [])[:10],
         "source": "manual",
         "created_at": now_ms(),
@@ -493,7 +630,6 @@ def stock_delete():
     append_jsonl(LOG_DIR / "stocks.jsonl", {"event": "delete", "id": sid, "ts": now_ms()})
     return jsonify({"ok": True, "deleted": sid}), 200
 
-# ---- 追加1: ストック全削除 ----
 @app.post("/api/stock/clear")
 @require_access_code
 @rate_limit
@@ -509,7 +645,6 @@ def stock_clear():
     append_jsonl(LOG_DIR / "stocks.jsonl", {"event": "clear", "deleted": cnt, "ts": now_ms()})
     return jsonify({"ok": True, "deleted": cnt}), 200
 
-# ---- 追加2: ストック一括インポート（JSON）----
 @app.post("/api/stock/import")
 @require_access_code
 @rate_limit
@@ -530,7 +665,6 @@ def stock_import():
     truncate = True if body.get("truncate_before", False) else False
 
     if truncate and not dry:
-        # 既存全削除
         for p in STOCK_DIR.glob("*.json"):
             try:
                 p.unlink(missing_ok=True)
@@ -552,12 +686,23 @@ def stock_import():
             skipped += 1
             continue
 
+        subject = raw.get("subject", "")
+        category = raw.get("category", "")
+        grade = raw.get("grade", "")
+
+        if subject not in ALLOWED_SUBJECTS:
+            subject = ""
+        if subject and category and category not in ALLOWED_CAT_BY_SUBJECT[subject]:
+            category = ""
+        if grade and grade not in ALLOWED_GRADES:
+            grade = ""
+
         item = {
             "id": raw.get("id") or uuid.uuid4().hex,
             "question": q,
-            "subject": (raw.get("subject", "") if raw.get("subject", "") in ALLOWED_SUBJECTS else ""),
-            "category": (raw.get("category", "") if raw.get("category", "") in ALLOWED_CATEGORIES else ""),
-            "grade": (raw.get("grade", "") if raw.get("grade", "") in ALLOWED_GRADES else ""),
+            "subject": subject,
+            "category": category,
+            "grade": grade,
             "difficulty": (raw.get("difficulty", "10点") if raw.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
             "tags": [normalize_text(str(t))[:20] for t in (raw.get("tags") or [])][:10] if isinstance(raw.get("tags"), list) else [],
             "model_answer": normalize_text(raw.get("model_answer", ""))[:2000],
@@ -573,7 +718,6 @@ def stock_import():
             continue
 
         if dup_item and overwrite:
-            # 既存IDを使って上書き
             item["id"] = dup_item.get("id")
             path = STOCK_DIR / f"{item['id']}.json"
             atomic_write_json(path, item)
@@ -605,8 +749,10 @@ def generate_question():
     t0 = time.time()
     err = ensure_openai()
     if err:
+        _update_metrics("generate", False, t0)
         return jsonify({"ok": False, "error": err}), 503
     if not request.is_json:
+        _update_metrics("generate", False, t0)
         return jsonify({"error": "Content-Type must be application/json"}), 415
 
     payload_in = request.get_json(force=True, silent=True) or {}
@@ -618,14 +764,11 @@ def generate_question():
             model=MODEL_ID,
             messages=messages,
             temperature=0.6,
-            max_tokens=600,
+            max_tokens=MAX_TOKENS_GEN,
         )
         text = (rsp.choices[0].message.content or "").strip()
     except Exception as e:
-        METRICS["gen_err"] += 1
-        METRICS["gen_n"] += 1
-        dt = int((time.time() - t0) * 1000)
-        METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
+        _update_metrics("generate", False, t0)
         return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
 
     obj = parse_first_json_block(text) or {}
@@ -638,24 +781,17 @@ def generate_question():
         tags = [str(tags)]
     tags = [normalize_text(t)[:20] for t in tags][:10]
 
-    # 最低限の妥当性担保
     if not question:
         question = normalize_text(text)[:2000]
     if not question:
-        METRICS["gen_err"] += 1
-        METRICS["gen_n"] += 1
-        dt = int((time.time() - t0) * 1000)
-        METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
+        _update_metrics("generate", False, t0)
         return jsonify({"ok": False, "error": "generation failed"}), 502
 
     # 重複回避
     dup = find_duplicate_in_stocks(question)
     if dup:
         append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated-duplicate", "question": question, "ts": now_ms()})
-        METRICS["gen_ok"] += 1
-        METRICS["gen_n"] += 1
-        dt = int((time.time() - t0) * 1000)
-        METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
+        _update_metrics("generate", True, t0)
         generated = {
             "question": question,
             "model_answer": model_answer,
@@ -687,11 +823,7 @@ def generate_question():
         for k in ("model_answer", "explanation", "intention"):
             resp_item.pop(k, None)
 
-    METRICS["gen_ok"] += 1
-    METRICS["gen_n"] += 1
-    dt = int((time.time() - t0) * 1000)
-    METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
-
+    _update_metrics("generate", True, t0)
     return jsonify({"ok": True, "item": resp_item}), 200
 
 # =========================
@@ -704,14 +836,17 @@ def grade_answer():
     t0 = time.time()
     err = ensure_openai()
     if err:
+        _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": err}), 503
     if not request.is_json:
+        _update_metrics("grade", False, t0)
         return jsonify({"error": "Content-Type must be application/json"}), 415
 
     data_in = request.get_json(force=True, silent=True) or {}
     data = validate_grading_payload(data_in)
 
     if not data["question"] or not data["student_answer"]:
+        _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": "question と student_answer は必須です"}), 400
 
     messages = build_grading_messages(data)
@@ -720,18 +855,14 @@ def grade_answer():
             model=MODEL_ID,
             messages=messages,
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=MAX_TOKENS_GRADE,
         )
         text = (rsp.choices[0].message.content or "").strip()
     except Exception as e:
-        METRICS["grade_err"] += 1
-        METRICS["grade_n"] += 1
-        dt = int((time.time() - t0) * 1000)
-        METRICS["grade_avg_ms"] = (METRICS["grade_avg_ms"] * (METRICS["grade_n"] - 1) + dt) / max(METRICS["grade_n"], 1)
+        _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
 
     result = parse_first_json_block(text) or {}
-    # スコア整形
     try:
         score = int(result.get("score", 0))
     except Exception:
@@ -754,11 +885,7 @@ def grade_answer():
         "ts": now_ms()
     })
 
-    METRICS["grade_ok"] += 1
-    METRICS["grade_n"] += 1
-    dt = int((time.time() - t0) * 1000)
-    METRICS["grade_avg_ms"] = (METRICS["grade_avg_ms"] * (METRICS["grade_n"] - 1) + dt) / max(METRICS["grade_n"], 1)
-
+    _update_metrics("grade", True, t0)
     return jsonify({
         "ok": True,
         "score": score,
@@ -816,41 +943,48 @@ def export_grading_jsonl():
         path.write_text("", encoding="utf-8")
     return send_file(path, as_attachment=True, download_name="grading.jsonl", mimetype="application/jsonl")
 
-# ---- 追加3: ログZIP ----
+# ---- ログZIP ----
 @app.get("/logs.zip")
 @require_access_code
 def download_logs_zip():
     """
-    logs/errors.jsonl, logs/generation.jsonl, logs/grading.jsonl をZIP化。
+    logs/errors.jsonl, logs/generation.jsonl, logs/grading.jsonl, logs/stocks.jsonl をZIP化。
     クエリ ?include=stocks を付けると stocks/*.json も同梱。
     """
     include = (request.args.get("include") or "").lower()
     with io.BytesIO() as mem:
         with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
-            # logs
             for name in ("errors.jsonl", "generation.jsonl", "grading.jsonl", "stocks.jsonl"):
                 p = LOG_DIR / name
                 if p.exists():
                     z.write(p, arcname=f"logs/{name}")
-            # stocks（任意）
             if include == "stocks":
                 for p in STOCK_DIR.glob("*.json"):
                     z.write(p, arcname=f"stocks/{p.name}")
         mem.seek(0)
-        return send_file(
-            mem,
-            as_attachment=True,
-            download_name="logs.zip",
-            mimetype="application/zip"
-        )
+        return send_file(mem, as_attachment=True, download_name="logs.zip", mimetype="application/zip")
 
 # ---- モデル情報 ----
 @app.get("/api/model")
 def api_model():
     return {"model": MODEL_ID}, 200
 
+@app.post("/api/model")
+@require_access_code
+def set_model():
+    """モデルを動的切替（UIから安全に変更可能に）"""
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 415
+    body = request.get_json(force=True, silent=True) or {}
+    new_model = normalize_text(body.get("model", ""))
+    if not new_model:
+        return jsonify({"ok": False, "error": "model is required"}), 400
+    # ここではホワイトリスト制限はせず、任意文字列を許容（運用で制御）
+    global MODEL_ID
+    MODEL_ID = new_model
+    return jsonify({"ok": True, "model": MODEL_ID}), 200
+
 # ---- エントリポイント ----
 if __name__ == "__main__":
-    # Render/Gunicorn 本番では不要。ローカル開発用。
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=bool(os.getenv("DEBUG")))
