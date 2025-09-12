@@ -1,16 +1,12 @@
-# ===== app.py (個人運用・一般公開想定 / 改良統合版) =====
-# 変更点（統合ポイント）:
-# - 生成APIに novelty スコアを追加（既出類似度 1 - maxSim）。duplicate時も返却
-# - /status にメトリクスを追加（生成/採点 OK/ERR、平均レイテンシms）
-# - CSVエクスポートを UTF-8 BOM に変更（Windowsでの文字化け対策）
-# - 既存のレート制限/バリデーション/ディスク状況/ログ/重複対策は維持
-# - ACCESS_CODE は変更系と一部情報系のみ保護（元仕様を尊重）
-#
-# 既存仕様（維持）
+# app.py
+# Flask API（個人運用・一般公開想定）
+# - ルート(/)で templates/index.html を返す
 # - CORS: ALLOWED_ORIGIN（カンマ区切り）
 # - 永続化: DATA_DIR（未設定時 /var/tmp/eichan）
-# - エンドポイント: 生成/採点/ストック/エクスポート/ヘルス/ステータス 等
-# - JSON強制、500/404ハンドラ、レート制限
+# - ACCESS_CODE（任意）で変更系・情報系の一部エンドポイントを保護
+# - 機能: 生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
+# - メトリクス: /status に成功/失敗数・平均レイテンシ
+# - 互換: ?code= でも受け取り／Cookie保存用 /auth を同梱（任意）
 
 import os
 import re
@@ -25,7 +21,7 @@ from functools import wraps
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 
 # --- OpenAI (v1 SDK) ---
@@ -38,11 +34,11 @@ except Exception:
 # =========================
 # アプリ設定
 # =========================
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000))  # 1MB
 
-# CORS: ALLOWED_ORIGIN はカンマ区切りで複数可（末尾スラなし、スキーム必須）
+# CORS: ALLOWED_ORIGIN はカンマ区切りで複数可
 ALLOWED_ORIGIN_RAW = os.getenv("ALLOWED_ORIGIN", "")
 CORS_ORIGINS = [o.strip() for o in ALLOWED_ORIGIN_RAW.split(",") if o.strip()]
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS or None}}, supports_credentials=True)
@@ -50,7 +46,7 @@ CORS(app, resources={r"/*": {"origins": CORS_ORIGINS or None}}, supports_credent
 # 永続保存先
 DATA_DIR = os.getenv("DATA_DIR", "/var/tmp/eichan")
 DATA = Path(DATA_DIR)
-STOCK_DIR = DATA / "stocks"     # 1問1ファイル(JSON)
+STOCK_DIR = DATA / "stocks"
 LOG_DIR = DATA / "logs"
 UPLOAD_DIR = DATA / "uploads"
 for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR):
@@ -75,17 +71,17 @@ ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
 
-# 簡易レート制限（IPごと/分あたりの最大リクエスト数）
+# レート制限
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 _rate_bucket: Dict[str, List[float]] = {}
 
-# 入力のホワイトリスト
+# ホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
 ALLOWED_CATEGORIES = {"地理", "歴史", "生物", "化学", "地学", "物理", "天体"}
 ALLOWED_GRADES = {"中1", "中2", "中3"}
 ALLOWED_DIFFICULTY = {"5点", "10点"}
 
-# ---- メトリクス（追加） ----
+# メトリクス
 METRICS = {
     "gen_ok": 0, "gen_err": 0, "gen_avg_ms": 0.0, "gen_n": 0,
     "grade_ok": 0, "grade_err": 0, "grade_avg_ms": 0.0, "grade_n": 0,
@@ -122,7 +118,6 @@ def is_similar(a: str, b: str, threshold: float = 0.92) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= threshold
 
 def max_similarity_to_stocks(text: str) -> Dict[str, Any]:
-    """既存ストックとの最大類似度と対象文（novelty用）"""
     text = normalize_text(text)
     best = 0.0
     best_q = ""
@@ -159,7 +154,6 @@ def save_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
     item["created_at"] = item.get("created_at", now_ms())
     path = STOCK_DIR / f"{sid}.json"
     atomic_write_json(path, item)
-    # 上限超過なら古いものから削除
     files = list_stock_files()
     if len(files) > MAX_STOCK:
         for p in files[: len(files) - MAX_STOCK]:
@@ -200,7 +194,12 @@ def require_access_code(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if ACCESS_CODE:
-            provided = request.headers.get("X-Access-Code") or request.args.get("access_code")
+            provided = (
+                request.headers.get("X-Access-Code")
+                or request.args.get("access_code")
+                or request.args.get("code")             # 互換（過去クライアント）
+                or request.cookies.get("access_code")   # /auth 利用時
+            )
             if provided != ACCESS_CODE:
                 return jsonify({"error": "Forbidden"}), 403
         return fn(*args, **kwargs)
@@ -295,22 +294,16 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         f"避ける話題（任意）: {avoid or '特になし'}\n"
         f"解答分量の目安: {length_hint}\n\n"
         "要件:\n"
-        "1) テキストのみで成立する記述問題を1問。"
+        "1) テキストのみで成立する記述問題を1問。\n"
         "   ・模範解答は30〜80字程度\n"
         "   ・『理由・因果・しくみ』を問う\n"
         "2) JSONで返す: {"
-        '"question": str, '
-        '"model_answer": str, '
-        '"explanation": str, '
-        '"intention": str, '
-        '"tags": [str]'
+        '"question": str, "model_answer": str, "explanation": str, "intention": str, "tags": [str]'
         "}\n"
-        "3) 同一テーマの連発を避け、地域/時代/観点に幅を持たせる\n"
+        "3) 同一テーマの連発を避ける\n"
     )
-    return [
-        {"role": "system", "content": sysprompt},
-        {"role": "user", "content": usr},
-    ]
+    return [{"role": "system", "content": sysprompt},
+            {"role": "user", "content": usr}]
 
 def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     q = payload["question"]
@@ -320,7 +313,6 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     sysprompt = (
         "あなたは中学生の記述解答を採点する試験官です。"
         "採点は0〜10点の整数。"
-        "配点が5点指定でも最終スコアは0〜10点で統一して返す。"
         "出力は必ずJSONで、"
         '{"score":int,"commentary":str,"model_answer":str,"reasons":[str]}。'
         "commentary の冒頭に『10点中◯点』を必ず含める。"
@@ -333,10 +325,15 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         f"配点設定: {difficulty}\n"
         "評価観点：正確性/要点の網羅/論理性/表現の明瞭さ。"
     )
-    return [
-        {"role": "system", "content": sysprompt},
-        {"role": "user", "content": usr},
-    ]
+    return [{"role": "system", "content": sysprompt},
+            {"role": "user", "content": usr}]
+
+# =========================
+# ルート（HTML）
+# =========================
+@app.get("/")
+def root():
+    return render_template("index.html")
 
 # =========================
 # エラーハンドラ
@@ -357,7 +354,7 @@ def _500(e):
     return jsonify({"ok": False, "error": "Internal Server Error"}), 500
 
 # =========================
-# ルーティング
+# 運用系
 # =========================
 @app.get("/healthz")
 def healthz():
@@ -366,7 +363,6 @@ def healthz():
 @app.get("/status")
 @require_access_code
 def status():
-    # ディスク使用状況などの簡易ステータス
     try:
         usage = shutil.disk_usage(DATA)
         disk = {"total": usage.total, "used": usage.used, "free": usage.free}
@@ -378,15 +374,9 @@ def status():
         "CORS": CORS_ORIGINS,
         "model": MODEL_ID,
         "disk": disk,
-        "metrics": {  # 追加
-            "generate": {
-                "ok": METRICS["gen_ok"], "err": METRICS["gen_err"],
-                "avg_ms": round(METRICS["gen_avg_ms"], 1), "n": METRICS["gen_n"]
-            },
-            "grade": {
-                "ok": METRICS["grade_ok"], "err": METRICS["grade_err"],
-                "avg_ms": round(METRICS["grade_avg_ms"], 1), "n": METRICS["grade_n"]
-            }
+        "metrics": {
+            "generate": {"ok": METRICS["gen_ok"], "err": METRICS["gen_err"], "avg_ms": round(METRICS["gen_avg_ms"], 1), "n": METRICS["gen_n"]},
+            "grade":    {"ok": METRICS["grade_ok"], "err": METRICS["grade_err"], "avg_ms": round(METRICS["grade_avg_ms"], 1), "n": METRICS["grade_n"]},
         }
     }), 200
 
@@ -413,9 +403,20 @@ def probe_write():
     p.write_text("ok", encoding="utf-8")
     return {"wrote": str(p)}, 200
 
+# ---- 簡易ログイン（Cookie保存・任意） ----
+@app.post("/auth")
+def auth():
+    code = (request.get_json(silent=True) or {}).get("code", "")
+    if not ACCESS_CODE:
+        return jsonify({"ok": True, "message": "ACCESS_CODE未設定（オープン）"})
+    if code == ACCESS_CODE:
+        resp = jsonify({"ok": True})
+        resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=True)
+        return resp
+    return jsonify({"ok": False, "error": "invalid_code"}), 401
+
 # ---- ストック API ----
 @app.get("/api/stock/list")
-@rate_limit
 def stock_list():
     items = current_stocks()
     return jsonify({"ok": True, "items": items, "count": len(items), "limit": MAX_STOCK}), 200
@@ -494,7 +495,6 @@ def generate_question():
     except Exception as e:
         METRICS["gen_err"] += 1
         METRICS["gen_n"] += 1
-        # 平均は失敗時もサンプル数だけ進める（偏り防止）
         dt = int((time.time() - t0) * 1000)
         METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
         return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
@@ -518,7 +518,7 @@ def generate_question():
         METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
         return jsonify({"ok": False, "error": "generation failed"}), 502
 
-    # novelty 計算（追加）
+    # novelty（新規性）
     sim_info = max_similarity_to_stocks(question)
     novelty_score = round(1 - float(sim_info["max_sim"]), 3)
 
@@ -552,16 +552,16 @@ def generate_question():
         "id": uuid.uuid4().hex,
         "source": "auto",
         "question": question,
-        "model_answer": model_answer,   # ヒント（UIで隠す前提）
-        "explanation": explanation,     # ヒント
-        "intention": intention,         # ヒント
+        "model_answer": model_answer,
+        "explanation": explanation,
+        "intention": intention,
         "tags": tags,
         "subject": payload["subject"],
         "category": payload["category"],
         "grade": payload["grade"],
         "difficulty": payload["difficulty"],
         "created_at": now_ms(),
-        "meta": {"novelty_score": novelty_score}  # 追加保存
+        "meta": {"novelty_score": novelty_score}
     }
     saved = save_stock_item(item)
     append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": saved, "ts": now_ms()})
@@ -671,7 +671,7 @@ def export_stocks_csv():
         "question", "model_answer", "explanation", "intention",
         "tags", "source", "created_at_iso", "novelty_score"
     ]
-    with tmp.open("w", newline="", encoding="utf-8-sig") as f:  # BOM付きに変更
+    with tmp.open("w", newline="", encoding="utf-8-sig") as f:  # BOM付き
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for it in items:
@@ -704,33 +704,6 @@ def export_grading_jsonl():
 @app.get("/api/model")
 def api_model():
     return {"model": MODEL_ID}, 200
-
-# ---- ルート（簡易案内） ----
-@app.get("/")
-def root():
-    return jsonify({
-        "name": "記述式API（個人運用版）",
-        "ok": True,
-        "endpoints": [
-            "GET  /healthz",
-            "GET  /status (ACCESS_CODE)",
-            "GET  /env-check (ACCESS_CODE)",
-            "POST /_probe-write (ACCESS_CODE)",
-            "GET  /api/stock/list",
-            "POST /api/stock/add (ACCESS_CODE)",
-            "POST /api/stock/delete (ACCESS_CODE)",
-            "POST /api/generate_question (ACCESS_CODE)",
-            "POST /api/grade_answer (ACCESS_CODE)",
-            "GET  /api/export/stocks.json (ACCESS_CODE)",
-            "GET  /api/export/stocks.csv (ACCESS_CODE)",
-            "GET  /api/export/grading.jsonl (ACCESS_CODE)",
-            "GET  /api/model"
-        ],
-        "DATA_DIR": str(DATA),
-        "CORS": CORS_ORIGINS or ["<same-origin only>"],
-        "protected_by_ACCESS_CODE": bool(ACCESS_CODE),
-        "model": MODEL_ID
-    }), 200
 
 # ---- エントリポイント ----
 if __name__ == "__main__":
