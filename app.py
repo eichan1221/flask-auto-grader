@@ -1,22 +1,26 @@
 # app.py
 # Flask API（個人運用・一般公開想定）
-# - ルート(/)で templates/index.html を返す
-# - CORS: ALLOWED_ORIGIN（カンマ区切り）
-# - 永続化: DATA_DIR（未設定時 /var/tmp/eichan）
-# - ACCESS_CODE（任意）で変更系・情報系の一部エンドポイントを保護
-# - 機能: 生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
-# - メトリクス: /status に成功/失敗数・平均レイテンシ
-# - 互換: ?code= でも受け取り／Cookie保存用 /auth を同梱（任意）
+# - ルート(/)で templates/index.html を返す（UIはレイアウト変更なし）
+# - CORS: ALLOWED_ORIGIN（カンマ区切り、末尾スラなし）
+# - 永続化: DATA_DIR（例: /var/data/eichan）。未設定時は /var/tmp/eichan
+# - ACCESS_CODE（任意）で変更系API・情報系の一部を保護
+# - 機能: 出題自動生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
+# - 改善: 入力バリデーション, JSON強制, レート制限, 500/404ハンドラ, ディスク使用状況, メトリクス
+# - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
+# - 追加: /api/stock/clear /api/stock/import /logs.zip /status に OpenAI 疎通
+# - 注意: UI 側の fetch は /api/* を呼び出す想定（HTMLは変更不要）
 
 import os
 import re
+import io
 import csv
 import json
 import time
 import uuid
 import shutil
+import zipfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -36,17 +40,18 @@ except Exception:
 # =========================
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
+# 投稿サイズの安全弁（必要に応じて拡張）
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000))  # 1MB
 
-# CORS: ALLOWED_ORIGIN はカンマ区切りで複数可
+# CORS: ALLOWED_ORIGIN はカンマ区切りで複数可（例: "https://flask-auto-grader.onrender.com,https://example.com"）
 ALLOWED_ORIGIN_RAW = os.getenv("ALLOWED_ORIGIN", "")
 CORS_ORIGINS = [o.strip() for o in ALLOWED_ORIGIN_RAW.split(",") if o.strip()]
 CORS(app, resources={r"/*": {"origins": CORS_ORIGINS or None}}, supports_credentials=True)
 
-# 永続保存先
+# 永続保存先（Persistent Disk 配下推奨）
 DATA_DIR = os.getenv("DATA_DIR", "/var/tmp/eichan")
 DATA = Path(DATA_DIR)
-STOCK_DIR = DATA / "stocks"
+STOCK_DIR = DATA / "stocks"     # 1問1ファイル(JSON)
 LOG_DIR = DATA / "logs"
 UPLOAD_DIR = DATA / "uploads"
 for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR):
@@ -56,6 +61,7 @@ for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR):
 _previous_candidates = [Path("/var/data/cyopa"), Path("/var/tmp/cyopa")]
 def _dir_nonempty(p: Path) -> bool:
     return p.exists() and any(p.iterdir())
+
 if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_nonempty(UPLOAD_DIR):
     for src in _previous_candidates:
         if _dir_nonempty(src):
@@ -71,11 +77,11 @@ ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
 
-# レート制限
+# レート制限（IPごと/分あたり）
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 _rate_bucket: Dict[str, List[float]] = {}
 
-# ホワイトリスト
+# 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
 ALLOWED_CATEGORIES = {"地理", "歴史", "生物", "化学", "地学", "物理", "天体"}
 ALLOWED_GRADES = {"中1", "中2", "中3"}
@@ -86,6 +92,9 @@ METRICS = {
     "gen_ok": 0, "gen_err": 0, "gen_avg_ms": 0.0, "gen_n": 0,
     "grade_ok": 0, "grade_err": 0, "grade_avg_ms": 0.0, "grade_n": 0,
 }
+
+# OpenAI疎通チェック（5分キャッシュ）
+_openai_ping_cache = {"ok": None, "detail": "", "ts": 0}
 
 # =========================
 # ユーティリティ
@@ -117,19 +126,6 @@ def is_similar(a: str, b: str, threshold: float = 0.92) -> bool:
         return False
     return SequenceMatcher(None, a, b).ratio() >= threshold
 
-def max_similarity_to_stocks(text: str) -> Dict[str, Any]:
-    text = normalize_text(text)
-    best = 0.0
-    best_q = ""
-    for it in current_stocks():
-        q = normalize_text(it.get("question", ""))
-        if not q:
-            continue
-        s = SequenceMatcher(None, text, q).ratio()
-        if s > best:
-            best, best_q = s, q
-    return {"max_sim": best, "similar_to": best_q}
-
 def list_stock_files() -> List[Path]:
     return sorted([p for p in STOCK_DIR.glob("*.json")], key=lambda p: p.stat().st_mtime)
 
@@ -154,6 +150,7 @@ def save_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
     item["created_at"] = item.get("created_at", now_ms())
     path = STOCK_DIR / f"{sid}.json"
     atomic_write_json(path, item)
+    # 上限超過なら古いものから削除
     files = list_stock_files()
     if len(files) > MAX_STOCK:
         for p in files[: len(files) - MAX_STOCK]:
@@ -177,6 +174,7 @@ def ensure_openai() -> Optional[str]:
     return None
 
 def parse_first_json_block(text: str) -> Dict[str, Any]:
+    # モデル出力がJSON以外を含む場合の保険（最初の { ... } を抽出）
     try:
         return json.loads(text)
     except Exception:
@@ -197,8 +195,8 @@ def require_access_code(fn):
             provided = (
                 request.headers.get("X-Access-Code")
                 or request.args.get("access_code")
-                or request.args.get("code")             # 互換（過去クライアント）
-                or request.cookies.get("access_code")   # /auth 利用時
+                or request.args.get("code")             # 互換
+                or request.cookies.get("access_code")   # /auth で設定可
             )
             if provided != ACCESS_CODE:
                 return jsonify({"error": "Forbidden"}), 403
@@ -213,6 +211,7 @@ def rate_limit(fn):
         ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
         now = time.time()
         bucket = _rate_bucket.setdefault(ip, [])
+        # 60秒より前を掃除
         while bucket and (now - bucket[0] > 60.0):
             bucket.pop(0)
         if len(bucket) >= RATE_LIMIT_PER_MIN:
@@ -233,7 +232,7 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         if grade not in ALLOWED_GRADES:
             grade = "中3"
     else:
-        grade = ""
+        grade = ""  # 社会は空でもOK
     difficulty = p.get("difficulty", "10点")
     if difficulty not in ALLOWED_DIFFICULTY:
         difficulty = "10点"
@@ -265,6 +264,25 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "model_answer": model_answer,
         "difficulty": difficulty,
     }
+
+def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
+    """OpenAIとの疎通を軽く確認（5分キャッシュ）"""
+    ttl_sec = 300
+    now = int(time.time())
+    if not force and _openai_ping_cache["ts"] and (now - _openai_ping_cache["ts"] < ttl_sec):
+        return _openai_ping_cache["ok"], _openai_ping_cache["detail"], _openai_ping_cache["ts"]
+    if client is None or not os.getenv("OPENAI_API_KEY"):
+        _openai_ping_cache.update({"ok": False, "detail": "SDK未初期化 or APIキー未設定", "ts": now})
+        return False, _openai_ping_cache["detail"], now
+    try:
+        # 軽い呼び出し（一覧の先頭だけを参照）
+        models = client.models.list()
+        ok = bool(getattr(models, "data", None))
+        _openai_ping_cache.update({"ok": ok, "detail": "ok" if ok else "no-data", "ts": now})
+        return ok, _openai_ping_cache["detail"], now
+    except Exception as e:
+        _openai_ping_cache.update({"ok": False, "detail": str(e), "ts": now})
+        return False, str(e), now
 
 # =========================
 # OpenAI プロンプト
@@ -329,10 +347,11 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
             {"role": "user", "content": usr}]
 
 # =========================
-# ルート（HTML）
+# ルート（UI）
 # =========================
 @app.get("/")
 def root():
+    # レイアウトは index.html に委譲（UIの変更は行わない）
     return render_template("index.html")
 
 # =========================
@@ -363,11 +382,13 @@ def healthz():
 @app.get("/status")
 @require_access_code
 def status():
+    # ディスク使用状況などの簡易ステータス
     try:
         usage = shutil.disk_usage(DATA)
         disk = {"total": usage.total, "used": usage.used, "free": usage.free}
     except Exception:
         disk = None
+    ok, detail, ts = check_openai_connectivity(force=False)
     return jsonify({
         "ok": True,
         "DATA_DIR": str(DATA),
@@ -377,7 +398,8 @@ def status():
         "metrics": {
             "generate": {"ok": METRICS["gen_ok"], "err": METRICS["gen_err"], "avg_ms": round(METRICS["gen_avg_ms"], 1), "n": METRICS["gen_n"]},
             "grade":    {"ok": METRICS["grade_ok"], "err": METRICS["grade_err"], "avg_ms": round(METRICS["grade_avg_ms"], 1), "n": METRICS["grade_n"]},
-        }
+        },
+        "openai": {"ok": ok, "detail": detail, "checked_at": ms_to_iso(ts * 1000)}
     }), 200
 
 @app.get("/env-check")
@@ -411,11 +433,14 @@ def auth():
         return jsonify({"ok": True, "message": "ACCESS_CODE未設定（オープン）"})
     if code == ACCESS_CODE:
         resp = jsonify({"ok": True})
+        # UI が Cookie を利用する場合に備えた互換用（UI自体はヘッダ送信でもOK）
         resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=True)
         return resp
     return jsonify({"ok": False, "error": "invalid_code"}), 401
 
-# ---- ストック API ----
+# =========================
+# ストック API
+# =========================
 @app.get("/api/stock/list")
 def stock_list():
     items = current_stocks()
@@ -468,7 +493,111 @@ def stock_delete():
     append_jsonl(LOG_DIR / "stocks.jsonl", {"event": "delete", "id": sid, "ts": now_ms()})
     return jsonify({"ok": True, "deleted": sid}), 200
 
-# ---- 生成 API ----
+# ---- 追加1: ストック全削除 ----
+@app.post("/api/stock/clear")
+@require_access_code
+@rate_limit
+def stock_clear():
+    files = list(STOCK_DIR.glob("*.json"))
+    cnt = 0
+    for p in files:
+        try:
+            p.unlink(missing_ok=True)
+            cnt += 1
+        except Exception:
+            pass
+    append_jsonl(LOG_DIR / "stocks.jsonl", {"event": "clear", "deleted": cnt, "ts": now_ms()})
+    return jsonify({"ok": True, "deleted": cnt}), 200
+
+# ---- 追加2: ストック一括インポート（JSON）----
+@app.post("/api/stock/import")
+@require_access_code
+@rate_limit
+def stock_import():
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 415
+    body = request.get_json(force=True, silent=True) or {}
+    # 入力形式: {items: [...], dry_run: bool, skip_duplicates: bool, overwrite_if_similar: bool, truncate_before: bool}
+    items = body.get("items")
+    if items is None and isinstance(body, list):  # ルート配列も許容
+        items = body
+    if not isinstance(items, list):
+        return jsonify({"ok": False, "error": "items(list) が必要です"}), 400
+
+    dry = bool(body.get("dry_run", False))
+    skip_dup = True if body.get("skip_duplicates", True) else False
+    overwrite = True if body.get("overwrite_if_similar", False) else False
+    truncate = True if body.get("truncate_before", False) else False
+
+    if truncate and not dry:
+        # 既存全削除
+        for p in STOCK_DIR.glob("*.json"):
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    added, skipped, replaced = 0, 0, 0
+    saved_ids: List[str] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        q = normalize_text(raw.get("question", ""))[:2000]
+        if not q:
+            skipped += 1
+            continue
+        dup_item = find_duplicate_in_stocks(q)
+        if dup_item and skip_dup and not overwrite:
+            skipped += 1
+            continue
+
+        item = {
+            "id": raw.get("id") or uuid.uuid4().hex,
+            "question": q,
+            "subject": (raw.get("subject", "") if raw.get("subject", "") in ALLOWED_SUBJECTS else ""),
+            "category": (raw.get("category", "") if raw.get("category", "") in ALLOWED_CATEGORIES else ""),
+            "grade": (raw.get("grade", "") if raw.get("grade", "") in ALLOWED_GRADES else ""),
+            "difficulty": (raw.get("difficulty", "10点") if raw.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
+            "tags": [normalize_text(str(t))[:20] for t in (raw.get("tags") or [])][:10] if isinstance(raw.get("tags"), list) else [],
+            "model_answer": normalize_text(raw.get("model_answer", ""))[:2000],
+            "explanation": (raw.get("explanation", "") or "").strip(),
+            "intention": (raw.get("intention", "") or "").strip(),
+            "source": raw.get("source", "import"),
+            "created_at": int(raw.get("created_at", now_ms())),
+        }
+
+        if dry:
+            added += 1  # 仮に追加扱い
+            saved_ids.append(item["id"])
+            continue
+
+        if dup_item and overwrite:
+            # 既存IDを使って上書き
+            item["id"] = dup_item.get("id")
+            path = STOCK_DIR / f"{item['id']}.json"
+            atomic_write_json(path, item)
+            replaced += 1
+            saved_ids.append(item["id"])
+        else:
+            saved = save_stock_item(item)
+            added += 1
+            saved_ids.append(saved["id"])
+
+    append_jsonl(LOG_DIR / "stocks.jsonl", {
+        "event": "import",
+        "dry_run": dry,
+        "truncate_before": truncate,
+        "added": added,
+        "skipped": skipped,
+        "replaced": replaced,
+        "ts": now_ms()
+    })
+    return jsonify({"ok": True, "dry_run": dry, "added": added, "skipped": skipped, "replaced": replaced, "ids_sample": saved_ids[:10]}), 200
+
+# =========================
+# 生成 API
+# =========================
 @app.post("/api/generate_question")
 @require_access_code
 @rate_limit
@@ -509,6 +638,7 @@ def generate_question():
         tags = [str(tags)]
     tags = [normalize_text(t)[:20] for t in tags][:10]
 
+    # 最低限の妥当性担保
     if not question:
         question = normalize_text(text)[:2000]
     if not question:
@@ -518,17 +648,10 @@ def generate_question():
         METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
         return jsonify({"ok": False, "error": "generation failed"}), 502
 
-    # novelty（新規性）
-    sim_info = max_similarity_to_stocks(question)
-    novelty_score = round(1 - float(sim_info["max_sim"]), 3)
-
     # 重複回避
     dup = find_duplicate_in_stocks(question)
     if dup:
-        append_jsonl(LOG_DIR / "generation.jsonl", {
-            "event": "generated-duplicate", "question": question, "ts": now_ms(),
-            "novelty_score": novelty_score, "similar_to": sim_info["similar_to"]
-        })
+        append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated-duplicate", "question": question, "ts": now_ms()})
         METRICS["gen_ok"] += 1
         METRICS["gen_n"] += 1
         dt = int((time.time() - t0) * 1000)
@@ -540,28 +663,21 @@ def generate_question():
             "intention": intention,
             "tags": tags
         }
-        return jsonify({
-            "ok": True,
-            "duplicate_of": dup.get("id"),
-            "item": dup,
-            "generated": generated,
-            "novelty": {"score": novelty_score, "similar_to": sim_info["similar_to"], "threshold": 0.92}
-        }), 200
+        return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup, "generated": generated}), 200
 
     item = {
         "id": uuid.uuid4().hex,
         "source": "auto",
         "question": question,
-        "model_answer": model_answer,
-        "explanation": explanation,
-        "intention": intention,
+        "model_answer": model_answer,   # ヒント（UIで隠す前提）
+        "explanation": explanation,     # ヒント
+        "intention": intention,         # ヒント
         "tags": tags,
         "subject": payload["subject"],
         "category": payload["category"],
         "grade": payload["grade"],
         "difficulty": payload["difficulty"],
         "created_at": now_ms(),
-        "meta": {"novelty_score": novelty_score}
     }
     saved = save_stock_item(item)
     append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": saved, "ts": now_ms()})
@@ -576,13 +692,11 @@ def generate_question():
     dt = int((time.time() - t0) * 1000)
     METRICS["gen_avg_ms"] = (METRICS["gen_avg_ms"] * (METRICS["gen_n"] - 1) + dt) / max(METRICS["gen_n"], 1)
 
-    return jsonify({
-        "ok": True,
-        "item": resp_item,
-        "novelty": {"score": novelty_score, "similar_to": sim_info["similar_to"], "threshold": 0.92}
-    }), 200
+    return jsonify({"ok": True, "item": resp_item}), 200
 
-# ---- 採点 API ----
+# =========================
+# 採点 API
+# =========================
 @app.post("/api/grade_answer")
 @require_access_code
 @rate_limit
@@ -617,6 +731,7 @@ def grade_answer():
         return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
 
     result = parse_first_json_block(text) or {}
+    # スコア整形
     try:
         score = int(result.get("score", 0))
     except Exception:
@@ -652,7 +767,9 @@ def grade_answer():
         "reasons": reasons
     }), 200
 
-# ---- エクスポート（JSON / CSV） ----
+# =========================
+# エクスポート
+# =========================
 @app.get("/api/export/stocks.json")
 @require_access_code
 def export_stocks_json():
@@ -669,9 +786,9 @@ def export_stocks_csv():
     fields = [
         "id", "subject", "category", "grade", "difficulty",
         "question", "model_answer", "explanation", "intention",
-        "tags", "source", "created_at_iso", "novelty_score"
+        "tags", "source", "created_at_iso"
     ]
-    with tmp.open("w", newline="", encoding="utf-8-sig") as f:  # BOM付き
+    with tmp.open("w", newline="", encoding="utf-8-sig") as f:  # BOM付き(Excel対策)
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for it in items:
@@ -688,7 +805,6 @@ def export_stocks_csv():
                 "tags": ";".join(it.get("tags", []) or []),
                 "source": it.get("source", ""),
                 "created_at_iso": ms_to_iso(it.get("created_at", 0)),
-                "novelty_score": (it.get("meta", {}) or {}).get("novelty_score", "")
             })
     return send_file(tmp, as_attachment=True, download_name="stocks.csv", mimetype="text/csv")
 
@@ -700,6 +816,34 @@ def export_grading_jsonl():
         path.write_text("", encoding="utf-8")
     return send_file(path, as_attachment=True, download_name="grading.jsonl", mimetype="application/jsonl")
 
+# ---- 追加3: ログZIP ----
+@app.get("/logs.zip")
+@require_access_code
+def download_logs_zip():
+    """
+    logs/errors.jsonl, logs/generation.jsonl, logs/grading.jsonl をZIP化。
+    クエリ ?include=stocks を付けると stocks/*.json も同梱。
+    """
+    include = (request.args.get("include") or "").lower()
+    with io.BytesIO() as mem:
+        with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            # logs
+            for name in ("errors.jsonl", "generation.jsonl", "grading.jsonl", "stocks.jsonl"):
+                p = LOG_DIR / name
+                if p.exists():
+                    z.write(p, arcname=f"logs/{name}")
+            # stocks（任意）
+            if include == "stocks":
+                for p in STOCK_DIR.glob("*.json"):
+                    z.write(p, arcname=f"stocks/{p.name}")
+        mem.seek(0)
+        return send_file(
+            mem,
+            as_attachment=True,
+            download_name="logs.zip",
+            mimetype="application/zip"
+        )
+
 # ---- モデル情報 ----
 @app.get("/api/model")
 def api_model():
@@ -707,5 +851,6 @@ def api_model():
 
 # ---- エントリポイント ----
 if __name__ == "__main__":
+    # Render/Gunicorn 本番では不要。ローカル開発用。
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=bool(os.getenv("DEBUG")))

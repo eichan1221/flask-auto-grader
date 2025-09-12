@@ -84,12 +84,12 @@
         <div>
           <label for="baseUrl">API Base URL（空=同一オリジン）</label>
           <input type="text" id="baseUrl" placeholder="例 https://your.onrender.com">
-          <div class="small muted">CORS済みのURLを指定。空欄なら同一オリジン。</div>
+          <div class="small muted">CORSを設定済みのURLを指定。空欄なら同一オリジンを使用。</div>
         </div>
         <div>
           <label for="accessCode">ACCESS_CODE（保護API用 / 任意）</label>
           <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与">
-          <div class="small muted">生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
+          <div class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
         </div>
       </div>
       <div class="flex" style="margin-top:8px">
@@ -168,7 +168,6 @@
               <button class="btn" id="btnUseForGrading">この問題で採点へ</button>
               <label class="pill"><input type="checkbox" id="toggleHints"> ヒントを表示</label>
               <span id="dupNote" class="small"></span>
-              <span id="noveltyNote" class="small"></span>
             </div>
             <div id="hintBox" class="hint" style="display:none;margin-top:10px">
               <div><span class="caps">模範解答</span><div id="genModelAnswer" class="mono"></div></div>
@@ -283,7 +282,7 @@
     // ---- UI状態 ----
     let subject = '社会';
     let currentItem = null;      // {question, model_answer, ...}
-    let generatedRaw = null;     // 生成APIの生データ
+    let generatedRaw = null;     // 生成APIの生データ（duplicate情報含む）
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -300,13 +299,16 @@
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
+      // モデル表示
       try{
         const r = await apiGet('/api/model');
         $('#modelTag').textContent = `model: ${r.model}`;
       }catch(e){
         $('#modelTag').textContent = 'model: (取得失敗)';
       }
+      // ストック一覧
       await refreshStock();
+      // 既存状態
       updateSubjectTabs();
       $('#settingsCard').style.display = 'none';
     }
@@ -316,12 +318,17 @@
       document.querySelectorAll('.tab').forEach(el=>{
         el.classList.toggle('active', el.dataset.subject === subject);
       });
-      const cat = $('#category'); cat.innerHTML = '';
+      const cat = $('#category');
+      cat.innerHTML = '';
       if(subject==='社会'){
-        ['地理','歴史'].forEach(x=>{ const o=document.createElement('option'); o.textContent=x; cat.appendChild(o); });
+        ['地理','歴史'].forEach(x=>{
+          const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
+        });
         $('#gradeBox').style.display='none';
       }else{
-        ['生物','化学','地学','物理','天体'].forEach(x=>{ const o=document.createElement('option'); o.textContent=x; cat.appendChild(o); });
+        ['生物','化学','地学','物理','天体'].forEach(x=>{
+          const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
+        });
         $('#gradeBox').style.display='';
       }
     }
@@ -337,25 +344,26 @@
         include_hints: $('#includeHints').checked,
         length_hint: $('#lengthHint').value || '30〜80字程度',
       };
-      const btn = $('#btnGenerate');
-      btn.disabled = true; btn.textContent = '生成中…';
       try{
         const res = await apiPost('/api/generate_question', payload);
         generatedRaw = res;
-        const item = res.item || res.generated || {};
-        currentItem = res.item ? res.item : item;  // 保存済み or 生成内容
-        renderGenerated(item, res.duplicate_of, res.novelty);
+        let item = res.item || res.generated || {};
+        if(res.item && res.item.question){
+          // 保存済み（自動でストックに入る）
+          currentItem = res.item;
+        }else{
+          currentItem = item;
+        }
+        renderGenerated(item, res.duplicate_of);
         await refreshStock();
         toast('問題を生成しました');
       }catch(e){
         console.error(e);
         toast('生成に失敗しました: ' + e.message, false);
-      }finally{
-        btn.disabled = false; btn.textContent = '問題を自動生成';
       }
     }
 
-    function renderGenerated(item, dupOf, novelty){
+    function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
       $('#genModelAnswer').textContent = item.model_answer || '';
@@ -369,9 +377,10 @@
       if(item.difficulty) meta.push(item.difficulty);
       $('#genMeta').textContent = meta.join(' / ');
       const tagsBox = $('#genTags'); tagsBox.innerHTML='';
-      tags.forEach(t=>{ const s=document.createElement('span'); s.className='tag'; s.textContent=t; tagsBox.appendChild(s); });
-      $('#dupNote').textContent = dupOf ? `（注）ストック類似: ${dupOf}` : '';
-      $('#noveltyNote').textContent = novelty && typeof novelty.score==='number' ? `新規性: ${novelty.score}` : '';
+      tags.forEach(t=>{
+        const s=document.createElement('span'); s.className='tag'; s.textContent=t; tagsBox.appendChild(s);
+      });
+      $('#dupNote').textContent = dupOf ? `（注）ストック内の類似: ${dupOf}` : '';
       $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
     }
 
@@ -380,11 +389,10 @@
       try{
         const r = await apiGet('/api/stock/list');
         const list = $('#stockList'); list.innerHTML='';
-        (r.items||[]).forEach(it=>{
+        r.items.forEach(it=>{
           const div=document.createElement('div'); div.className='item';
           const top=document.createElement('div');
-          const nov = (it.meta && typeof it.meta.novelty_score==='number') ? ` / 新規性:${it.meta.novelty_score}` : '';
-          top.innerHTML = `<div class="small muted">${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}${nov}</div>`;
+          top.innerHTML = `<div class="small muted">${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}</div>`;
           const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
           const actions=document.createElement('div'); actions.className='flex';
           const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
@@ -448,7 +456,9 @@
         $('#commentary').textContent = r.commentary || '';
         $('#gradedModel').textContent = r.model_answer || '';
         const ul = $('#reasons'); ul.innerHTML='';
-        (r.reasons||[]).forEach(s=>{ const li=document.createElement('li'); li.textContent=s; ul.appendChild(li); });
+        (r.reasons||[]).forEach(s=>{
+          const li=document.createElement('li'); li.textContent=s; ul.appendChild(li);
+        });
         toast('採点しました');
       }catch(e){
         console.error(e);
@@ -480,6 +490,7 @@
     $('#toggleHints').onchange = ()=> $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
     $('#btnUseForGrading').onclick = ()=>{
       if(!generatedRaw){ toast('先に生成してください', false); return; }
+      // 生成結果 or duplicate の元を採点にセット
       const item = (generatedRaw.item || generatedRaw.generated);
       useStock(item);
     };
