@@ -77,6 +77,46 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
+    <!-- 使い方（常時表示・冒頭） -->
+    <div class="card" id="howtoCard">
+      <h2>使い方（かんたんガイド）</h2>
+      <div class="small muted" style="margin-bottom:6px">※見た目は固定のまま、機能説明のみを表示しています。</div>
+      <ol style="line-height:1.7;margin:0;padding-left:18px">
+        <li><b>初期設定（必要な場合のみ）</b>：右上の「設定」から
+          <span class="tag">API Base URL</span> と <span class="tag">ACCESS_CODE</span> を入力→「保存」→「再読込」。
+          右上の <span class="tag">model: …</span> にモデル名が表示されれば接続OKです。
+        </li>
+        <li><b>出題を自動生成</b>：左カラムの ①
+          <ul style="margin:6px 0 0 14px;padding-left:0">
+            <li>科目タブで <b>社会/理科</b> を選択（理科は<b>学年</b>も選択）。<span class="small muted">※「天体」は中3のみ</span></li>
+            <li><b>分類・難易度・分量・方向性・避ける話題</b>を設定し、必要なら<b>ヒントを含める</b>にチェック。</li>
+            <li>「<b>問題を自動生成</b>」を押すと、結果が表示されストックにも保存されます。
+              類似がある場合は「<span class="small muted">ストック内の類似: …</span>」が出ます。</li>
+          </ul>
+        </li>
+        <li><b>ストックの活用</b>：左下の「ストック（最新10件）」から
+          <b>この問題を使う</b>で右カラムの採点対象にセット。必要に応じて
+          <span class="tag">stocks.json</span>/<span class="tag">stocks.csv</span> をエクスポートできます。
+          <span class="small muted">（上限10件、古いものから自動削除）</span>
+        </li>
+        <li><b>採点</b>：右カラムの ②
+          <ul style="margin:6px 0 0 14px;padding-left:0">
+            <li>対象問題を確認し、必要なら<b>模範解答を渡す</b>や<b>ヒントを表示</b>をON。</li>
+            <li>解答を入力し、配点（5点/10点）を選んで<b>採点する</b>。
+              「10点中◯点」＋講評・理由・参考の模範解答が表示されます。</li>
+            <li>採点ログは <span class="tag">grading.jsonl</span> としてエクスポートできます。</li>
+          </ul>
+        </li>
+        <li><b>エラー対処</b>：
+          <ul style="margin:6px 0 0 14px;padding-left:0">
+            <li><b>403 Forbidden</b>：<span class="tag">ACCESS_CODE</span> が未設定/不一致。設定画面で入力してください。</li>
+            <li><b>CORSエラー</b>：デプロイ先の <span class="mono">ALLOWED_ORIGIN</span> にこのUIのURLを含めてください。</li>
+            <li><b>OpenAI API error</b>：サーバの <span class="mono">/status</span> で疎通確認（認証要）。</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
     <!-- 設定 -->
     <div class="card" id="settingsCard" style="display:none">
       <h2>接続設定</h2>
@@ -257,7 +297,6 @@
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {headers});
       if(!res.ok){
-        // ACCESS_CODEのヒントを付与（403のとき）
         if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
         let msg = `${res.status} ${res.statusText}`;
         try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
@@ -288,8 +327,8 @@
 
     // ---- UI状態 ----
     let subject = '社会';
-    let currentItem = null;      // {question, model_answer, ...}
-    let generatedRaw = null;     // 生成APIの生データ（duplicate情報含む）
+    let currentItem = null;
+    let generatedRaw = null;
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -308,7 +347,6 @@
       if(subject!=='理科') return;
       const g = $('#grade').value;
       const cat = $('#category');
-      // 「天体」オプションの有効/無効と自動切替
       [...cat.options].forEach(opt=>{
         if(opt.textContent==='天体'){
           opt.disabled = (g !== '中3');
@@ -322,16 +360,13 @@
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
-      // モデル表示
       try{
         const r = await apiGet('/api/model');
         $('#modelTag').textContent = `model: ${r.model}`;
       }catch(e){
         $('#modelTag').textContent = 'model: (取得失敗)';
       }
-      // ストック一覧
       await refreshStock();
-      // 既存状態
       updateSubjectTabs();
       applyScienceConstraints();
       $('#settingsCard').style.display = 'none';
@@ -354,7 +389,7 @@
           const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
         });
         $('#gradeBox').style.display='';
-        applyScienceConstraints(); // 理科切替直後にも適用
+        applyScienceConstraints();
       }
     }
 
@@ -510,7 +545,6 @@
         updateSubjectTabs();
       }
     });
-    // 学年変更時にも制約適用（UIはそのまま）
     $('#grade').onchange = applyScienceConstraints;
 
     $('#btnGenerate').onclick = handleGenerate;
