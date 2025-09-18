@@ -7,9 +7,9 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
-/* フォント & ベース色（index.html内の<style>が後勝ち） */
+/* 変数（index.html内の<style>が後勝ち） */
 :root{
-  /* index.html側と同名の変数を用意（万一inlineが読み込まれない時の保険） */
+  /* 既存のこのCSS内で使用する基本色 */
   --text-dark:#111827;
   --muted:#6b7280;
   --card:#ffffff;
@@ -20,37 +20,49 @@ html, body { margin: 0; padding: 0; }
   --primary:#a78bfa;
   --primary-strong:#7c3aed;
 
-  /* 以前の壊れた変数を修正して定義 */
   --success:#22c55e;
   --success-bg:#eafaf0;
   --danger:#ef4444;
   --danger-bg:#fee2e2;
+
+  /* index.html 側の変数名と相互補完（片方が未定義でも見た目が破綻しない） */
+  --ink: var(--text-dark, #1f2937);
+  --brand: var(--primary, #a78bfa);
+  --brand-strong: var(--primary-strong, #7c3aed);
+  --accent: #f9a8d4;
+  --accent-strong: #f472b6;
+  --ok: var(--success, #22c55e);
+  --warn: #f59e0b;
+  --err: var(--danger, #ef4444);
+  --shadow: rgba(0,0,0,0.08);
+  --bg1:#fdf6ff;
+  --bg2:#f0fbff;
 }
 
 body{
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, "Noto Sans JP", sans-serif;
   line-height: 1.6;
-  color: var(--text-dark);
+  color: var(--ink);
   background: #fff; /* 黒背景化してしまう古い指定を打ち消し */
 }
 
 /* コンテナ（index.html側と同値。後勝ちなので衝突しません） */
-.container{
+:where(.container){
   max-width: 980px;
   margin: 24px auto;
   padding: 0 16px;
 }
 
 /* カード */
-.card{
+:where(.card){
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px;
 }
 
-/* 行レイアウトの補助（フレックス方向のみ） */
-.row{
+/* 行レイアウト補助（低特異性。index.htmlの.grid指定が優先されます） */
+:where(.row){
   display: flex;
   gap: 8px;
   align-items: center;
@@ -58,8 +70,8 @@ body{
 }
 
 /* テキスト */
-.muted{ color: var(--muted); font-size: 13px; }
-.badge{
+:where(.muted){ color: var(--muted); font-size: 13px; }
+:where(.badge){
   display: inline-block;
   padding: 2px 6px;
   border: 1px solid var(--pastel-accent-strong);
@@ -75,26 +87,26 @@ h1{ margin-bottom: 8px; }
 /* フォーム要素：白背景＆濃色文字を強制（可読性の担保） */
 label{ font-size: 14px; color: #374151; display: block; margin-bottom: 4px; }
 
-select,
-input[type="text"],
-textarea{
+:where(select),
+:where(input[type="text"]),
+:where(textarea){
   width: 100%;
   padding: 8px;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   background: #fff;           /* 黒背景化対策 */
-  color: var(--text-dark);     /* 白文字固定の古い指定を上書き */
+  color: var(--ink);           /* 白文字固定の古い指定を上書き */
   outline: none;
   font-size: 16px;             /* iOSの自動ズーム防止 */
 }
 
-textarea{ min-height: 120px; }
+:where(textarea){ min-height: 120px; }
 
 /* プレースホルダーの可読性 */
 ::placeholder{ color: #9aa3af; }
 
 /* Safari/Firefoxでのselect矢印・配色崩れ対策（見た目は現状キープ） */
-select{
+:where(select){
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -102,33 +114,33 @@ select{
 }
 
 /* フォーカス（控えめな枠線に） */
-select:focus,
-input[type="text"]:focus,
-textarea:focus{
-  border-color: var(--primary-strong);
+:where(select:focus),
+:where(input[type="text"]:focus),
+:where(textarea:focus){
+  border-color: var(--brand-strong);
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
 }
 
-/* ボタン（index側と整合） */
-.btn{
+/* ボタン（index側の .btn, .btn.brand 等が後勝ち） */
+:where(.btn){
   padding: 10px 16px;
   border-radius: 10px;
-  border: 1px solid var(--primary-strong);
-  background: var(--primary);
+  border: 1px solid var(--brand-strong);
+  background: var(--brand);
   color: #fff;
   cursor: pointer;
 }
-.btn:hover{ background: var(--primary-strong); }
-.btn.secondary{
+:where(.btn:hover){ background: var(--brand-strong); }
+:where(.btn).secondary{
   background: #fff;
-  color: var(--primary-strong);
-  border: 1px solid var(--primary-strong);
+  color: var(--brand-strong);
+  border: 1px solid var(--brand-strong);
 }
 
 /* 出力表示用pre */
 pre{
   background: var(--pastel-bg);
-  color: var(--text-dark);
+  color: var(--ink);
   padding: 12px;
   border-radius: 10px;
   border: 1px solid var(--pastel-accent-strong);
@@ -152,10 +164,10 @@ details.hints > summary{
 details.hints > summary::-webkit-details-marker{ display: none; }
 
 /* モーダル（indexのUIに合わせた補助。色味は既存変数使用） */
-.modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
-.modal .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
-.stock-item{ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
-.stock-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+:where(.modal){ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
+:where(.modal) .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
+:where(.stock-item){ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
+:where(.stock-actions){ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
 
 /* ---------- ここから下は「意図せぬ全体反転」を防ぐ保護 ---------- */
 
@@ -164,7 +176,7 @@ html.dark body,
 body.dark,
 [data-theme="dark"] body{
   background: #fff;
-  color: var(--text-dark);
+  color: var(--ink);
 }
 
 /* aタグの色だけ極端に薄くなる指定の無効化 */
@@ -178,7 +190,7 @@ body, select, input, textarea, button, pre, .card{
 
 /* 余計な !important で白文字固定される事故を緩和（強度を抑えた再指定） */
 select, input, textarea, button{
-  color: var(--text-dark);
+  color: var(--ink);
 }
 
 /* 印刷時（オプション：背景色を落として読みやすく） */
@@ -190,5 +202,8 @@ select, input, textarea, button{
 /* モバイル細かな調整（レイアウトは変えない） */
 @media (max-width: 720px){
   body{ line-height: 1.7; }
-  .row{ gap: 10px; }
+  .row{ gap: 10px; } /* :where 指定でもOKだが既存互換のためこのまま */
 }
+
+/* 既定で model バッジは非表示（HTML側でも非表示化済み。二重の保険） */
+#modelTag{ display:none; }

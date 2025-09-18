@@ -40,6 +40,12 @@ except Exception:
 # =========================
 # アプリ設定
 # =========================
+def env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000))  # 1MB
@@ -47,7 +53,11 @@ app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000
 # CORS
 ALLOWED_ORIGIN_RAW = os.getenv("ALLOWED_ORIGIN", "")
 CORS_ORIGINS = [o.strip() for o in ALLOWED_ORIGIN_RAW.split(",") if o.strip()]
-CORS(app, resources={r"/*": {"origins": CORS_ORIGINS or None}}, supports_credentials=True)
+# credentials と * は併用不可。未設定時は * / 資格情報オフ、設定済みはピン留め / 資格情報オン
+if CORS_ORIGINS:
+    CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}}, supports_credentials=True)
+else:
+    CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
 
 # 永続保存先
 DATA_DIR = os.getenv("DATA_DIR", "/var/tmp/eichan")
@@ -75,6 +85,7 @@ if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_none
 
 ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+RELEASE = os.getenv("RELEASE", "").strip()
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
 NOVELTY_THRESHOLD = float(os.getenv("NOVELTY_THRESHOLD", "0.92"))
 MAX_TOKENS_GEN = int(os.getenv("MAX_TOKENS_GEN", "600"))
@@ -228,6 +239,8 @@ def rate_limit(fn):
         if RATE_LIMIT_PER_MIN <= 0:
             return fn(*args, **kwargs)
         ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
+        if "," in ip:
+            ip = ip.split(",")[0].strip()  # 先頭を採用
         now = time.time()
         bucket = _rate_bucket.setdefault(ip, [])
         while bucket and (now - bucket[0] > 60.0):
@@ -246,7 +259,6 @@ def _update_metrics(kind: str, ok: bool, t0: float):
     else:
         METRICS[f"{key}_err"] += 1
     METRICS[f"{key}_n"] += 1
-    # 移動平均（単純）
     prev_n = max(METRICS[f"{key}_n"], 1)
     METRICS[f"{key}_avg_ms"] = (METRICS[f"{key}_avg_ms"] * (prev_n - 1) + dt) / prev_n
 
@@ -307,7 +319,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
-    """OpenAIとの疎通を軽く確認（5分キャッシュ）"""
+    """OpenAIとの疎通を軽く確認（5分キャッシュ／対象モデルのみ）"""
     ttl_sec = 300
     now = int(time.time())
     if not force and _openai_ping_cache["ts"] and (now - _openai_ping_cache["ts"] < ttl_sec):
@@ -316,10 +328,11 @@ def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str,
         _openai_ping_cache.update({"ok": False, "detail": "SDK未初期化 or APIキー未設定", "ts": now})
         return False, _openai_ping_cache["detail"], now
     try:
-        models = client.models.list()
-        ok = bool(getattr(models, "data", None))
-        _openai_ping_cache.update({"ok": ok, "detail": "ok" if ok else "no-data", "ts": now})
-        return ok, _openai_ping_cache["detail"], now
+        # 重い list() ではなく、使うモデルのみ確認
+        client.models.retrieve(MODEL_ID)
+        ok = True
+        _openai_ping_cache.update({"ok": ok, "detail": "ok", "ts": now})
+        return ok, "ok", now
     except Exception as e:
         _openai_ping_cache.update({"ok": False, "detail": str(e), "ts": now})
         return False, str(e), now
@@ -438,6 +451,7 @@ def status():
         "DATA_DIR": str(DATA),
         "CORS": CORS_ORIGINS,
         "model": MODEL_ID,
+        "release": RELEASE,
         "disk": disk,
         "metrics": {
             "generate": {"ok": METRICS["gen_ok"], "err": METRICS["gen_err"], "avg_ms": round(METRICS["gen_avg_ms"], 1), "n": METRICS["gen_n"]},
@@ -462,6 +476,7 @@ def env_check():
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
         "MODEL_ID": MODEL_ID,
+        "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
         "MAX_TOKENS_GRADE": MAX_TOKENS_GRADE,
     }), 200
@@ -481,7 +496,8 @@ def auth():
         return jsonify({"ok": True, "message": "ACCESS_CODE未設定（オープン）"})
     if code == ACCESS_CODE:
         resp = jsonify({"ok": True})
-        resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=True)
+        is_secure = (request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
+        resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=is_secure)
         return resp
     return jsonify({"ok": False, "error": "invalid_code"}), 401
 
@@ -546,7 +562,6 @@ def stock_random():
     source = request.args.get("source", "")
     exclude_ids = set([s for s in (request.args.get("exclude_ids", "") or "").split(",") if s])
 
-    # 再利用：searchのmatchロジックを簡略
     def match(it: Dict[str, Any]) -> bool:
         if it.get("id") in exclude_ids:
             return False
@@ -987,4 +1002,4 @@ def set_model():
 # ---- エントリポイント ----
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=bool(os.getenv("DEBUG")))
+    app.run(host="0.0.0.0", port=port, debug=env_bool("DEBUG"))

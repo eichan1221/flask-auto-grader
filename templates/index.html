@@ -60,6 +60,10 @@
     .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
     .caps{font-variant:all-small-caps;letter-spacing:.04em}
     .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
+    /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
+    :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
+    /* model 表示は非表示に */
+    #modelTag{ display:none; }
   </style>
 </head>
 <body>
@@ -67,7 +71,7 @@
     <div class="wrap toolbar">
       <div class="flex" style="gap:10px">
         <h1>記述式API（個人運用UI）</h1>
-        <span id="modelTag" class="tag">model: ...</span>
+        <span id="modelTag" class="tag" aria-hidden="true">model: ...</span>
       </div>
       <div class="flex">
         <button class="btn ghost" id="btnSettings">設定</button>
@@ -123,13 +127,13 @@
       <div class="grid-2">
         <div>
           <label for="baseUrl">API Base URL（空=同一オリジン）</label>
-          <input type="text" id="baseUrl" placeholder="例 https://your.onrender.com">
-          <div class="small muted">CORSを設定済みのURLを指定。空欄なら同一オリジンを使用。</div>
+          <input type="text" id="baseUrl" placeholder="例 https://your.onrender.com" aria-describedby="baseUrlHelp" />
+          <div id="baseUrlHelp" class="small muted">CORSを設定済みのURLを指定。空欄なら同一オリジンを使用。</div>
         </div>
         <div>
           <label for="accessCode">ACCESS_CODE（保護API用 / 任意）</label>
-          <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与">
-          <div class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
+          <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与" aria-describedby="accessCodeHelp" />
+          <div id="accessCodeHelp" class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
         </div>
       </div>
       <div class="flex" style="margin-top:8px">
@@ -151,8 +155,8 @@
         </div>
 
         <div class="flex" style="gap:6px;margin-bottom:8px">
-          <span class="tab active" data-subject="社会">社会</span>
-          <span class="tab" data-subject="理科">理科</span>
+          <span class="tab active" data-subject="社会" tabindex="0">社会</span>
+          <span class="tab" data-subject="理科" tabindex="0">理科</span>
         </div>
 
         <div class="grid-2">
@@ -180,15 +184,15 @@
           </div>
           <div>
             <label>解答分量の目安</label>
-            <input type="text" id="lengthHint" value="30〜80字程度">
+            <input type="text" id="lengthHint" value="30〜80字程度" maxlength="40">
           </div>
           <div>
             <label>出題の方向性（任意）</label>
-            <input type="text" id="genreHint" placeholder="制度/文化/時代背景 など">
+            <input type="text" id="genreHint" placeholder="制度/文化/時代背景 など" maxlength="120">
           </div>
           <div>
             <label>避ける話題（任意）</label>
-            <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい">
+            <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
           </div>
         </div>
 
@@ -251,7 +255,7 @@
 
         <div class="flex-col" style="margin-top:10px">
           <label>あなたの解答</label>
-          <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安）"></textarea>
+          <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安）" maxlength="2000"></textarea>
         </div>
         <div class="flex" style="margin-top:10px">
           <select id="gradeDifficulty">
@@ -278,7 +282,7 @@
     </div>
   </main>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
     // ---- 設定の永続化 ----
@@ -362,9 +366,10 @@
       loadSettings();
       try{
         const r = await apiGet('/api/model');
-        $('#modelTag').textContent = `model: ${r.model}`;
+        // model表示は非表示化しているため、DOM更新は行わない
+        // $('#modelTag').textContent = `model: ${r.model}`;
       }catch(e){
-        $('#modelTag').textContent = 'model: (取得失敗)';
+        // $('#modelTag').textContent = 'model: (取得失敗)';
       }
       await refreshStock();
       updateSubjectTabs();
@@ -404,6 +409,8 @@
         include_hints: $('#includeHints').checked,
         length_hint: $('#lengthHint').value || '30〜80字程度',
       };
+      const btn = $('#btnGenerate');
+      btn.disabled = true; const txt = btn.textContent; btn.textContent = '生成中…';
       try{
         const res = await apiPost('/api/generate_question', payload);
         generatedRaw = res;
@@ -419,6 +426,8 @@
       }catch(e){
         console.error(e);
         toast('生成に失敗しました: ' + e.message, false);
+      }finally{
+        btn.disabled = false; btn.textContent = txt;
       }
     }
 
@@ -450,9 +459,13 @@
         const list = $('#stockList'); list.innerHTML='';
         r.items.forEach(it=>{
           const div=document.createElement('div'); div.className='item';
-          const top=document.createElement('div');
-          top.innerHTML = `<div class="small muted">${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}</div>`;
+
+          const topWrap=document.createElement('div');
+          topWrap.className='small muted';
+          topWrap.textContent = `${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}`;
+
           const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
+
           const actions=document.createElement('div'); actions.className='flex';
           const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
           useBtn.onclick=()=>{ useStock(it); };
@@ -462,13 +475,17 @@
             del.onclick=()=>deleteStock(it.id);
             actions.appendChild(del);
           }
-          div.appendChild(top); div.appendChild(q); div.appendChild(actions);
+          div.appendChild(topWrap); div.appendChild(q); div.appendChild(actions);
           list.appendChild(div);
         });
         $('#stockCount').textContent = `件数: ${r.count} / 上限 ${r.limit}`;
       }catch(e){
         console.error(e);
-        $('#stockList').innerHTML = `<div class="small danger">取得に失敗: ${e.message}</div>`;
+        const list = $('#stockList'); list.innerHTML='';
+        const errDiv = document.createElement('div');
+        errDiv.className = 'small danger';
+        errDiv.textContent = '取得に失敗: ' + e.message;
+        list.appendChild(errDiv);
       }
     }
     async function deleteStock(id){
@@ -508,6 +525,8 @@
       if(!body.student_answer.trim()){
         toast('解答を入力してください', false); return;
       }
+      const btn = $('#btnGrade');
+      btn.disabled = true; const txt = btn.textContent; btn.textContent = '採点中…';
       try{
         const r = await apiPost('/api/grade_answer', body);
         $('#gradeResult').style.display='';
@@ -522,6 +541,8 @@
       }catch(e){
         console.error(e);
         toast('採点に失敗: ' + e.message, false);
+      }finally{
+        btn.disabled = false; btn.textContent = txt;
       }
     }
 
@@ -545,6 +566,12 @@
         updateSubjectTabs();
       }
     });
+    // Enter/Spaceでタブ切替（span.tabをボタン相当に）
+    document.addEventListener('keydown', (e)=>{
+      const t = e.target.closest('.tab');
+      if(t && (e.key === 'Enter' || e.key === ' ')){ t.click(); e.preventDefault(); }
+    });
+
     $('#grade').onchange = applyScienceConstraints;
 
     $('#btnGenerate').onclick = handleGenerate;
