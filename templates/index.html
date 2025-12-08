@@ -60,9 +60,7 @@
     .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
     .caps{font-variant:all-small-caps;letter-spacing:.04em}
     .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
-    /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
     :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
-    /* model 表示は非表示に */
     #modelTag{ display:none; }
   </style>
 </head>
@@ -81,7 +79,6 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
-    <!-- 使い方（常時表示・冒頭） -->
     <div class="card" id="howtoCard">
       <h2>使い方（かんたんガイド）</h2>
       <div class="small muted" style="margin-bottom:6px">※見た目は固定のまま、機能説明のみを表示しています。</div>
@@ -121,7 +118,6 @@
       </ol>
     </div>
 
-    <!-- 設定 -->
     <div class="card" id="settingsCard" style="display:none">
       <h2>接続設定</h2>
       <div class="grid-2">
@@ -144,7 +140,6 @@
     </div>
 
     <div class="row" style="margin-top:12px">
-      <!-- 左：生成 & ストック -->
       <section class="card">
         <div class="toolbar">
           <h2>① 出題の生成 & ストック</h2>
@@ -180,6 +175,7 @@
             <select id="difficulty">
               <option>5点</option>
               <option selected>10点</option>
+              <option>満点</option>
             </select>
           </div>
           <div>
@@ -230,7 +226,6 @@
         </div>
       </section>
 
-      <!-- 右：採点 -->
       <section class="card">
         <div class="toolbar">
           <h2>② 採点</h2>
@@ -285,7 +280,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
-    // ---- 設定の永続化 ----
     const $ = (q)=>document.querySelector(q);
     const cfg = {
       get baseUrl(){ return localStorage.getItem('baseUrl') || ''; },
@@ -295,7 +289,6 @@
       endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
     };
 
-    // ---- 共通Fetch ----
     async function apiGet(path){
       const headers = {};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -304,6 +297,9 @@
         if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
         let msg = `${res.status} ${res.statusText}`;
         try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
+        if(res.status === 429) msg += '（連続操作が多すぎます。少し待って再実行）';
+        if(res.status === 503) msg += '（サーバ側でOpenAI設定未完了の可能性）';
+        if(res.status === 502) msg += '（OpenAI側エラー/上限の可能性）';
         throw new Error(msg);
       }
       return res.json();
@@ -316,6 +312,9 @@
         if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
         let msg = `${res.status} ${res.statusText}`;
         try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
+        if(res.status === 429) msg += '（連続操作が多すぎます。少し待って再実行）';
+        if(res.status === 503) msg += '（サーバ側でOpenAI設定未完了の可能性）';
+        if(res.status === 502) msg += '（OpenAI側エラー/上限の可能性）';
         throw new Error(msg);
       }
       return res.json();
@@ -329,12 +328,11 @@
       setTimeout(()=>t.classList.remove('show'), 2200);
     }
 
-    // ---- UI状態 ----
     let subject = '社会';
     let currentItem = null;
     let generatedRaw = null;
+    let lastIncludeHints = false;
 
-    // ---- 設定UI ----
     function loadSettings(){
       $('#baseUrl').value = cfg.baseUrl;
       $('#accessCode').value = cfg.accessCode;
@@ -346,7 +344,6 @@
       setTimeout(()=>$('#statusLine').textContent='', 1500);
     }
 
-    // ---- 学年とカテゴリの整合（理科：天体は中3のみ）----
     function applyScienceConstraints(){
       if(subject!=='理科') return;
       const g = $('#grade').value;
@@ -361,23 +358,15 @@
       });
     }
 
-    // ---- 初期化 ----
     async function boot(){
       loadSettings();
-      try{
-        const r = await apiGet('/api/model');
-        // model表示は非表示化しているため、DOM更新は行わない
-        // $('#modelTag').textContent = `model: ${r.model}`;
-      }catch(e){
-        // $('#modelTag').textContent = 'model: (取得失敗)';
-      }
+      try{ await apiGet('/api/model'); }catch(e){}
       await refreshStock();
       updateSubjectTabs();
       applyScienceConstraints();
       $('#settingsCard').style.display = 'none';
     }
 
-    // ---- 生成UIロジック ----
     function updateSubjectTabs(){
       document.querySelectorAll('.tab').forEach(el=>{
         el.classList.toggle('active', el.dataset.subject === subject);
@@ -409,17 +398,15 @@
         include_hints: $('#includeHints').checked,
         length_hint: $('#lengthHint').value || '30〜80字程度',
       };
+      lastIncludeHints = payload.include_hints;
+
       const btn = $('#btnGenerate');
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '生成中…';
       try{
         const res = await apiPost('/api/generate_question', payload);
         generatedRaw = res;
         let item = res.item || res.generated || {};
-        if(res.item && res.item.question){
-          currentItem = res.item;
-        }else{
-          currentItem = item;
-        }
+        currentItem = item;
         renderGenerated(item, res.duplicate_of);
         await refreshStock();
         toast('問題を生成しました');
@@ -434,25 +421,28 @@
     function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
-      $('#genModelAnswer').textContent = item.model_answer || '';
-      $('#genExplanation').textContent = item.explanation || '';
-      $('#genIntention').textContent = item.intention || '';
-      const tags = item.tags || [];
+
       const meta = [];
       if(item.subject) meta.push(item.subject);
       if(item.category) meta.push(item.category);
       if(item.grade) meta.push(item.grade);
       if(item.difficulty) meta.push(item.difficulty);
       $('#genMeta').textContent = meta.join(' / ');
+
       const tagsBox = $('#genTags'); tagsBox.innerHTML='';
-      tags.forEach(t=>{
+      (item.tags || []).forEach(t=>{
         const s=document.createElement('span'); s.className='tag'; s.textContent=t; tagsBox.appendChild(s);
       });
       $('#dupNote').textContent = dupOf ? `（注）ストック内の類似: ${dupOf}` : '';
-      $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
+
+      // includeHints OFFなら、重複でもヒントを出さない
+      const showHints = lastIncludeHints && $('#toggleHints').checked;
+      $('#genModelAnswer').textContent = lastIncludeHints ? (item.model_answer || '') : '';
+      $('#genExplanation').textContent = lastIncludeHints ? (item.explanation || '') : '';
+      $('#genIntention').textContent = lastIncludeHints ? (item.intention || '') : '';
+      $('#hintBox').style.display = showHints ? '' : 'none';
     }
 
-    // ---- ストック一覧 ----
     async function refreshStock(){
       try{
         const r = await apiGet('/api/stock/list');
@@ -488,6 +478,7 @@
         list.appendChild(errDiv);
       }
     }
+
     async function deleteStock(id){
       if(!confirm('この問題を削除しますか？')) return;
       try{
@@ -498,6 +489,7 @@
         toast('削除に失敗: ' + e.message, false);
       }
     }
+
     function useStock(it){
       currentItem = it;
       $('#currentQuestionText').textContent = it.question || '';
@@ -509,7 +501,6 @@
       toast('採点対象にセットしました');
     }
 
-    // ---- 採点 ----
     async function handleGrade(){
       if(!currentItem || !currentItem.question){
         toast('先に問題を選ぶか生成してください', false); return;
@@ -546,7 +537,6 @@
       }
     }
 
-    // ---- エクスポート（ヘッダー付きDL）----
     async function downloadEndpoint(path, filename){
       const headers = {};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -559,14 +549,12 @@
       a.remove(); URL.revokeObjectURL(url);
     }
 
-    // ---- イベント結線 ----
     document.addEventListener('click', (e)=>{
       if(e.target.closest('.tab')){
         subject = e.target.closest('.tab').dataset.subject;
         updateSubjectTabs();
       }
     });
-    // Enter/Spaceでタブ切替（span.tabをボタン相当に）
     document.addEventListener('keydown', (e)=>{
       const t = e.target.closest('.tab');
       if(t && (e.key === 'Enter' || e.key === ' ')){ t.click(); e.preventDefault(); }
@@ -575,7 +563,10 @@
     $('#grade').onchange = applyScienceConstraints;
 
     $('#btnGenerate').onclick = handleGenerate;
-    $('#toggleHints').onchange = ()=> $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
+    $('#toggleHints').onchange = ()=> {
+      const showHints = lastIncludeHints && $('#toggleHints').checked;
+      $('#hintBox').style.display = showHints ? '' : 'none';
+    };
     $('#btnUseForGrading').onclick = ()=>{
       if(!generatedRaw){ toast('先に生成してください', false); return; }
       const item = (generatedRaw.item || generatedRaw.generated);
@@ -594,7 +585,6 @@
     $('#btnSaveSettings').onclick = ()=> { saveSettings(); boot(); };
     $('#btnReload').onclick = boot;
 
-    // 起動
     boot();
   </script>
 </body>

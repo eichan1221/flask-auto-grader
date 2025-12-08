@@ -43,7 +43,8 @@ body{
   font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, "Noto Sans JP", sans-serif;
   line-height: 1.6;
   color: var(--ink);
-  background: #fff; /* 黒背景化してしまう古い指定を打ち消し */
+  /* ✅ 背景は index.html のグラデに任せる（黒背景化だけ後段で保険） */
+  background: transparent;
 }
 
 /* コンテナ（index.html側と同値。後勝ちなので衝突しません） */
@@ -97,7 +98,7 @@ label{ font-size: 14px; color: #374151; display: block; margin-bottom: 4px; }
   background: #fff;           /* 黒背景化対策 */
   color: var(--ink);           /* 白文字固定の古い指定を上書き */
   outline: none;
-  font-size: 16px;             /* iOSの自動ズーム防止 */
+  font-size: 14px;             /* ✅ PCは index に合わせる */
 }
 
 :where(textarea){ min-height: 120px; }
@@ -175,7 +176,7 @@ details.hints > summary::-webkit-details-marker{ display: none; }
 html.dark body,
 body.dark,
 [data-theme="dark"] body{
-  background: #fff;
+  background: transparent;
   color: var(--ink);
 }
 
@@ -202,7 +203,9 @@ select, input, textarea, button{
 /* モバイル細かな調整（レイアウトは変えない） */
 @media (max-width: 720px){
   body{ line-height: 1.7; }
-  .row{ gap: 10px; } /* :where 指定でもOKだが既存互換のためこのまま */
+  .row{ gap: 10px; }
+  /* ✅ iOSズーム防止はモバイルだけで効かせる */
+  select, input[type="text"], textarea{ font-size:16px; }
 }
 
 /* 既定で model バッジは非表示（HTML側でも非表示化済み。二重の保険） */
