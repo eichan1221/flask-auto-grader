@@ -4,116 +4,9 @@
   <meta charset="utf-8" />
   <title>記述式API（個人運用版）UI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    :root{
-      --bg1:#fdf6ff; --bg2:#f0fbff;
-      --ink:#1f2937; --muted:#6b7280;
-      --brand:#c084fc; --brand-strong:#a855f7;
-      --accent:#f9a8d4; --accent-strong:#f472b6;
-      --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
-      --card:#ffffff; --border:#e5e7eb; --shadow:rgba(0,0,0,0.08);
-    }
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;background:linear-gradient(180deg,var(--bg1),var(--bg2))}
-    header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,0.75);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--border)}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    @media (max-width:900px){.row{grid-template-columns:1fr}}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 6px 20px var(--shadow);padding:16px}
-    h1{font-size:20px;margin:4px 0}
-    h2{font-size:18px;margin:8px 0 12px}
-    h3{font-size:15px;margin:10px 0 6px}
-    label{font-size:13px;color:var(--muted)}
-    input[type=text], select, textarea{
-      width:100%;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:14px;background:#fff
-    }
-    textarea{min-height:120px;resize:vertical}
-    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .flex-col{display:flex;gap:8px;flex-direction:column}
-    .btn{
-      border:1px solid var(--border);background:#fff;border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;cursor:pointer
-    }
-    .btn.brand{background:var(--brand);border-color:var(--brand);color:#fff}
-    .btn.ghost{background:transparent}
-    .btn.warn{background:var(--warn);border-color:var(--warn);color:#fff}
-    .btn.err{background:var(--err);border-color:var(--err);color:#fff}
-    .tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:#374151;background:#fff}
-    .toolbar{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}
-    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    @media (max-width:700px){.grid-2{grid-template-columns:1fr}}
-    .pill{
-      display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#fff
-    }
-    .small{font-size:12px;color:var(--muted)}
-    .qcard{background:#fff;border:1px dashed var(--border);border-radius:12px;padding:12px}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
-    .hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
-    .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
-    .toast.show{opacity:1;transform:none}
-    .danger{color:var(--err)}
-    .success{color:var(--ok)}
-    .muted{color:var(--muted)}
-    .divider{height:1px;background:var(--border);margin:8px 0}
-    .tab{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
-    .tab.active{background:var(--brand);border-color:var(--brand);color:#fff}
-    .list{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto}
-    .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
-    .caps{font-variant:all-small-caps;letter-spacing:.04em}
-    .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
 
-    /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
-    :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
-
-    /* model 表示は非表示に */
-    #modelTag{ display:none; }
-
-    /* =========================
-       使い方モーダル（小ウィンドウ）
-       ========================= */
-    .modal{
-      position:fixed; inset:0; z-index:999;
-      display:none; align-items:center; justify-content:center;
-      padding:16px;
-      background:rgba(17,24,39,0.35);
-      backdrop-filter: blur(4px);
-    }
-    .modal.show{ display:flex; }
-    .modal .panel{
-      width:min(920px, 96vw);
-      max-height:86vh;
-      overflow:auto;
-      background:var(--card);
-      border:1px solid var(--border);
-      border-radius:18px;
-      box-shadow:0 16px 60px rgba(0,0,0,0.18);
-      padding:16px;
-    }
-    .modal .panelHeader{
-      display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
-      position:sticky; top:0; background:rgba(255,255,255,0.92);
-      backdrop-filter:saturate(180%) blur(8px);
-      border-bottom:1px solid var(--border);
-      padding:8px 8px 10px;
-      border-radius:14px;
-    }
-    .modal .panelTitle{ margin:0; font-size:18px; }
-    .modal .panelBody{ padding:10px 6px 6px; }
-    .callout{
-      background:linear-gradient(180deg,#fff7ff,#f5fbff);
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:10px 12px;
-    }
-    .step{
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:12px;
-      background:#fff;
-    }
-    .step h3{ margin:0 0 6px; font-size:15px; }
-    .step ol, .step ul{ margin:8px 0 0; padding-left:18px; line-height:1.75; }
-    .step .mini{ font-size:12px; color:var(--muted); margin-top:6px; }
-  </style>
+  <!-- ✅ 外部CSSを読み込み（キャッシュ対策で ?v= を付与） -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260102">
 </head>
 <body>
   <header>
@@ -281,7 +174,15 @@
           <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
         </div>
 
-        <div class="qcard">
+        <!-- ✅ 追加：採点の観点を固定表示（常に見える） -->
+        <div class="qcard" id="rubricCard"
+             style="margin-top:10px; position: sticky; top: 82px; z-index: 2;">
+          <div class="small muted" style="font-weight:700">採点の観点（何を見られてるか）</div>
+          <ul id="rubricList" style="margin:6px 0 0;padding-left:18px;line-height:1.7"></ul>
+          <div id="rubricHint" class="small muted" style="margin-top:6px"></div>
+        </div>
+
+        <div class="qcard" style="margin-top:10px">
           <div class="small muted">対象問題</div>
           <div id="currentQuestionText" style="margin:6px 0 8px;line-height:1.6"></div>
           <div class="flex" style="gap:8px;align-items:center">
@@ -334,15 +235,40 @@
           <div class="qcard">
             <div id="scoreLine" class="success" style="font-weight:700"></div>
 
-            <!-- ✅ 追加（レイアウト維持）：満点確率表示 -->
+            <!-- ✅ 満点確率表示 -->
             <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
 
             <div id="commentary" style="margin:6px 0 8px"></div>
+
             <div class="small muted">理由</div>
             <ul id="reasons" style="margin-top:4px"></ul>
-            <div class="divider"></div>
+
+            <!-- ✅ 追加：次の一手（行動） -->
+            <div class="divider" style="margin:12px 0"></div>
+
+            <div id="weakTagsWrap" style="display:none">
+              <div class="small muted">弱点タグ</div>
+              <div id="weakTags" class="flex" style="gap:6px;flex-wrap:wrap;margin-top:4px"></div>
+            </div>
+
+            <div id="nextStepsWrap" style="display:none;margin-top:10px">
+              <div class="small muted">次の一手（1〜3個・短く）</div>
+              <ul id="nextSteps" style="margin-top:4px"></ul>
+            </div>
+
+            <div id="practiceMenuWrap" style="display:none;margin-top:10px">
+              <div class="small muted">練習メニュー（すぐできる）</div>
+              <ul id="practiceMenu" style="margin-top:4px"></ul>
+            </div>
+
+            <div class="divider" style="margin:12px 0"></div>
             <div class="small muted">参考：模範解答</div>
             <div id="gradedModel" class="mono"></div>
+          </div>
+
+          <!-- ✅ 追加：再挑戦（同じ問題で即リトライ） -->
+          <div class="flex" style="gap:8px;margin-top:10px">
+            <button class="btn brand" id="btnRetrySame">同じ問題でもう一回</button>
           </div>
         </div>
       </section>
@@ -513,6 +439,61 @@
       endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
     };
 
+    // ---- 追加：観点（固定表示のデフォルト） ----
+    const DEFAULT_RUBRIC = [
+      {key:'要点', desc:'問われている答えが入っている'},
+      {key:'因果', desc:'理由→結論がつながっている'},
+      {key:'用語', desc:'重要語句が入っている'},
+      {key:'表現', desc:'主語・比較・具体性が明確'}
+    ];
+    const DEFAULT_RUBRIC_HINT = '迷ったら「原因→結果」「重要語句」「比較の軸」を意識すると点が伸びやすいです。';
+
+    function escapeHtml(s){
+      return String(s ?? '')
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'","&#39;");
+    }
+
+    function renderRubric(rubric, hint){
+      const list = $('#rubricList');
+      const hintEl = $('#rubricHint');
+      if(!list || !hintEl) return;
+
+      const r = (Array.isArray(rubric) && rubric.length) ? rubric : DEFAULT_RUBRIC;
+      list.innerHTML = '';
+      r.forEach(x=>{
+        const k = x?.key ?? '';
+        const d = x?.desc ?? '';
+        const li = document.createElement('li');
+        li.innerHTML = `<b>${escapeHtml(k)}</b>：${escapeHtml(d)}`;
+        list.appendChild(li);
+      });
+      hintEl.textContent = (hint || DEFAULT_RUBRIC_HINT);
+    }
+
+    function clearGradeResultUI(){
+      const gr = $('#gradeResult');
+      if(gr) gr.style.display = 'none';
+
+      const scoreLine = $('#scoreLine'); if(scoreLine) scoreLine.textContent = '';
+      const perfectProbLine = $('#perfectProbLine'); if(perfectProbLine) perfectProbLine.textContent = '';
+      const commentary = $('#commentary'); if(commentary) commentary.textContent = '';
+      const gradedModel = $('#gradedModel'); if(gradedModel) gradedModel.textContent = '';
+      const reasons = $('#reasons'); if(reasons) reasons.innerHTML = '';
+
+      const weakWrap = $('#weakTagsWrap'); if(weakWrap) weakWrap.style.display = 'none';
+      const weakTags = $('#weakTags'); if(weakTags) weakTags.innerHTML = '';
+
+      const nsWrap = $('#nextStepsWrap'); if(nsWrap) nsWrap.style.display = 'none';
+      const ns = $('#nextSteps'); if(ns) ns.innerHTML = '';
+
+      const pmWrap = $('#practiceMenuWrap'); if(pmWrap) pmWrap.style.display = 'none';
+      const pm = $('#practiceMenu'); if(pm) pm.innerHTML = '';
+    }
+
     // ---- 共通Fetch ----
     async function apiGet(path){
       const headers = {};
@@ -651,23 +632,38 @@
       const m = $('#howtoModal');
       m.classList.add('show');
       m.setAttribute('aria-hidden','false');
-      // フォーカスを「閉じる」に移す（キーボードでも迷わない）
       setTimeout(()=>{ $('#btnHowtoClose').focus(); }, 0);
     }
     function closeHowto(){
       const m = $('#howtoModal');
       m.classList.remove('show');
       m.setAttribute('aria-hidden','true');
-      // 開いたボタンにフォーカスを戻す
       setTimeout(()=>{ $('#btnHowto').focus(); }, 0);
     }
 
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
+
+      // まずは固定観点（デフォルト）を描画
+      renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
+
+      // model表示
       try{
-        await apiGet('/api/model');
+        const m = await apiGet('/api/model');
+        if(m && m.model) $('#modelTag').textContent = `model: ${m.model}`;
       }catch(e){}
+
+      // /status（ACCESS_CODEがある場合だけ成功しやすい）からrubric更新
+      try{
+        const st = await apiGet('/status');
+        if(st && st.rubric){
+          renderRubric(st.rubric, st.rubric_hint);
+        }
+      }catch(e){
+        // 403等は無視（オープン運用でも動くように）
+      }
+
       await refreshStock();
       updateSubjectTabs();
       applyScienceConstraints();
@@ -767,13 +763,11 @@
       try{
         let r;
         if(q){
-          // 検索（/api/stock/search）
           const qs = buildQueryString({ q, limit: 50, offset: 0 });
           r = await apiGet('/api/stock/search' + qs);
           info.textContent = `検索中："${q}"（ヒット ${r.total ?? (r.items||[]).length} 件）`;
           renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length });
         }else{
-          // 通常（/api/stock/list）
           r = await apiGet('/api/stock/list');
           info.textContent = '';
           renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count });
@@ -806,7 +800,6 @@
         useBtn.onclick=()=>{ useStock(it); };
         actions.appendChild(useBtn);
 
-        // delete は ACCESS_CODE 設定時のみ表示（既存仕様を維持）
         if(cfg.accessCode){
           const del=document.createElement('button'); del.className='btn err'; del.textContent='削除';
           del.onclick=()=>deleteStock(it.id);
@@ -839,7 +832,6 @@
     }
 
     async function stockRandom(){
-      // 検索欄が入っていれば q を使う（無ければ全体からランダム）
       const q = ($('#stockSearch')?.value || '').trim();
       const qs = buildQueryString({ q });
       try{
@@ -868,7 +860,7 @@
       $('#currentIntnWrap').style.display = 'none';
 
       $('#studentAnswer').value = '';
-      $('#gradeResult').style.display = 'none';
+      clearGradeResultUI();
 
       window.scrollTo({top:0,behavior:'smooth'});
       toast('採点対象にセットしました');
@@ -894,16 +886,22 @@
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '採点中…';
       try{
         const r = await apiPost('/api/grade_answer', body);
+
+        // rubric（サーバーが返すなら更新）
+        if(r && r.rubric){
+          renderRubric(r.rubric, r.rubric_hint);
+        }
+
         $('#gradeResult').style.display='';
         $('#scoreLine').textContent = `スコア: 10点中${r.score}点`;
         $('#commentary').textContent = r.commentary || '';
         $('#gradedModel').textContent = r.model_answer || '';
+
         const ul = $('#reasons'); ul.innerHTML='';
         (r.reasons||[]).forEach(s=>{
           const li=document.createElement('li'); li.textContent=s; ul.appendChild(li);
         });
 
-        // ✅ 追加：満点（○）になる確率表示
         const prob = (r.perfect_probability ?? null);
         const note = (r.perfect_probability_note ?? '').toString().trim();
         const line = $('#perfectProbLine');
@@ -912,6 +910,60 @@
             line.textContent = '';
           }else{
             line.textContent = `満点（○）になる確率: ${prob}%${note ? `（${note}）` : ''}`;
+          }
+        }
+
+        // ✅ 次の一手 / 弱点タグ / 練習メニュー
+        const weakTags = Array.isArray(r.weak_tags) ? r.weak_tags : [];
+        const nextSteps = Array.isArray(r.next_steps) ? r.next_steps : [];
+        const practiceMenu = Array.isArray(r.practice_menu) ? r.practice_menu : [];
+
+        const weakWrap = $('#weakTagsWrap');
+        const weakBox = $('#weakTags');
+        if(weakWrap && weakBox){
+          weakBox.innerHTML = '';
+          if(weakTags.length){
+            weakWrap.style.display = '';
+            weakTags.slice(0,3).forEach(t=>{
+              const s=document.createElement('span');
+              s.className='tag';
+              s.textContent = t;
+              weakBox.appendChild(s);
+            });
+          }else{
+            weakWrap.style.display = 'none';
+          }
+        }
+
+        const nsWrap = $('#nextStepsWrap');
+        const nsUl = $('#nextSteps');
+        if(nsWrap && nsUl){
+          nsUl.innerHTML = '';
+          if(nextSteps.length){
+            nsWrap.style.display = '';
+            nextSteps.slice(0,3).forEach(s=>{
+              const li=document.createElement('li');
+              li.textContent = s;
+              nsUl.appendChild(li);
+            });
+          }else{
+            nsWrap.style.display = 'none';
+          }
+        }
+
+        const pmWrap = $('#practiceMenuWrap');
+        const pmUl = $('#practiceMenu');
+        if(pmWrap && pmUl){
+          pmUl.innerHTML = '';
+          if(practiceMenu.length){
+            pmWrap.style.display = '';
+            practiceMenu.slice(0,3).forEach(s=>{
+              const li=document.createElement('li');
+              li.textContent = s;
+              pmUl.appendChild(li);
+            });
+          }else{
+            pmWrap.style.display = 'none';
           }
         }
 
@@ -1011,7 +1063,17 @@
     };
 
     $('#btnGrade').onclick = handleGrade;
-    $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; $('#gradeResult').style.display='none'; };
+
+    // ✅ 変更：クリアは「解答欄 + 採点結果表示だけ」を消す（問題は保持）
+    $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; clearGradeResultUI(); };
+
+    // ✅ 追加：同じ問題でもう一回（即リトライ）
+    $('#btnRetrySame').onclick = ()=>{
+      $('#studentAnswer').value = '';
+      clearGradeResultUI(); // 結果だけ消す（問題は保持）
+      $('#studentAnswer').focus();
+      toast('同じ問題で再挑戦できます');
+    };
 
     $('#btnExportJson').onclick = ()=> downloadEndpoint('/api/export/stocks.json', 'stocks.json').catch(e=>toast('DL失敗: '+e.message,false));
     $('#btnExportCsv').onclick = ()=> downloadEndpoint('/api/export/stocks.csv', 'stocks.csv').catch(e=>toast('DL失敗: '+e.message,false));
@@ -1034,7 +1096,7 @@
     $('#btnHowto').onclick = openHowto;
     $('#btnHowtoClose').onclick = closeHowto;
     $('#howtoModal').addEventListener('click', (e)=>{
-      if(e.target === e.currentTarget) closeHowto(); // 背景クリックで閉じる
+      if(e.target === e.currentTarget) closeHowto();
     });
     document.addEventListener('keydown', (e)=>{
       const m = $('#howtoModal');
