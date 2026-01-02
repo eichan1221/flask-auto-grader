@@ -9,6 +9,7 @@
 # - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
 # - 追加: /api/stock/clear /api/stock/import /logs.zip /status に OpenAI 疎通
 # - 新規: /api/stock/search /api/stock/random /api/model(POST) / NOVELTY_THRESHOLD / MAX_TOKENS_*
+# - 将来課金用: 日次クォータ（FREE_DAILY_LIMIT / PRO_DAILY_LIMIT, /api/usage）
 # - 注意: UI 側の fetch は /api/* を呼び出す想定（HTMLは変更不要）
 
 import os
@@ -21,14 +22,22 @@ import uuid
 import shutil
 import zipfile
 import random
+import sys  # ← 追加
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
 from difflib import SequenceMatcher
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta  # ← timedelta を追加
 
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
+
+# ---- 追加：標準出力をUTF-8に寄せる（macOS/ターミナル環境の事故回避） ----
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # --- OpenAI (v1 SDK) ---
 try:
@@ -65,7 +74,8 @@ DATA = Path(DATA_DIR)
 STOCK_DIR = DATA / "stocks"     # 1問1ファイル(JSON)
 LOG_DIR = DATA / "logs"
 UPLOAD_DIR = DATA / "uploads"
-for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR):
+USAGE_DIR = DATA / "usage"      # ← 日次クォータ用
+for d in (DATA, STOCK_DIR, LOG_DIR, UPLOAD_DIR, USAGE_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # 旧パスからの引っ越し（空のときだけ安全にコピー）
@@ -95,6 +105,12 @@ MAX_TOKENS_GRADE = int(os.getenv("MAX_TOKENS_GRADE", "600"))
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 _rate_bucket: Dict[str, List[float]] = {}
 
+# 日次クォータ（将来の課金モデル用）
+# 0 以下なら「そのプランは無制限」
+FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "0"))  # 例: 5 にすると無料5回/日
+PRO_DAILY_LIMIT = int(os.getenv("PRO_DAILY_LIMIT", "0"))    # 例: 1000 にすると有料1000回/日
+DEFAULT_PLAN = (os.getenv("DEFAULT_PLAN") or "free").strip().lower()
+
 # 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
 ALLOWED_CATEGORIES = {"地理", "歴史", "生物", "化学", "地学", "物理", "天体"}
@@ -113,6 +129,15 @@ METRICS = {
 
 # OpenAI疎通チェック（5分キャッシュ）
 _openai_ping_cache = {"ok": None, "detail": "", "ts": 0}
+
+# ---- 追加：採点観点（UI固定表示したい情報をAPIでも返せるようにする） ----
+RUBRIC = [
+    {"key": "要点", "desc": "問われている答えが入っている"},
+    {"key": "因果", "desc": "理由→結論がつながっている"},
+    {"key": "用語", "desc": "重要語句が入っている"},
+    {"key": "表現", "desc": "主語・比較・具体性が明確"},
+]
+RUBRIC_HINT = "迷ったら「原因→結果」「重要語句」「比較の軸」を意識すると点が伸びやすいです。"
 
 # =========================
 # ユーティリティ
@@ -263,6 +288,126 @@ def _update_metrics(kind: str, ok: bool, t0: float):
     METRICS[f"{key}_avg_ms"] = (METRICS[f"{key}_avg_ms"] * (prev_n - 1) + dt) / prev_n
 
 # =========================
+# 日次クォータ関連（将来課金モデル用）
+# =========================
+def _today_key() -> str:
+    # サーバーローカルタイムの YYYYMMDD を使う
+    return datetime.now().astimezone().strftime("%Y%m%d")
+
+def _usage_file_for_today() -> Path:
+    return USAGE_DIR / f"{_today_key()}.json"
+
+def _load_usage_for_today() -> Dict[str, Any]:
+    p = _usage_file_for_today()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_usage_for_today(data: Dict[str, Any]):
+    atomic_write_json(_usage_file_for_today(), data)
+
+def _get_user_key() -> str:
+    # 将来: X-User-Id にユーザーID/メールなどを入れる想定
+    uid = (
+        request.headers.get("X-User-Id")
+        or request.headers.get("X-Forwarded-For", "")
+        or request.remote_addr
+        or "anonymous"
+    )
+    uid = normalize_text(uid)
+    return uid or "anonymous"
+
+def _plan_and_limit() -> Tuple[str, Optional[int]]:
+    """
+    現時点では:
+      - X-User-Plan ヘッダー or Cookie(user_plan) or DEFAULT_PLAN をプラン名として採用
+      - free → FREE_DAILY_LIMIT
+      - pro  → PRO_DAILY_LIMIT
+    0 以下の値なら「そのプランは無制限」として扱う。
+    """
+    plan = (
+        (request.headers.get("X-User-Plan") or "")
+        or (request.cookies.get("user_plan") or "")
+        or DEFAULT_PLAN
+    ).strip().lower() or "free"
+    if plan == "pro":
+        limit = PRO_DAILY_LIMIT
+    else:
+        limit = FREE_DAILY_LIMIT
+    if limit <= 0:
+        return plan, None  # 無制限
+    return plan, limit
+
+def _next_reset_iso() -> str:
+    # 次の0時（サーバータイム）のISO文字列
+    now = datetime.now().astimezone()
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return tomorrow.isoformat()
+
+def enforce_quota(kind: str):
+    """
+    kind: "generate" / "grade"
+    FREE_DAILY_LIMIT / PRO_DAILY_LIMIT を超えた場合は 429 を返す。
+    """
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            plan, limit = _plan_and_limit()
+            # 無制限プランならそのまま通す
+            if limit is None:
+                return fn(*args, **kwargs)
+
+            user_key = _get_user_key()
+            usage = _load_usage_for_today()
+            u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0}
+
+            if u.get("total", 0) >= limit:
+                reset_at = _next_reset_iso()
+                payload = {
+                    "ok": False,
+                    "error": "quota_exceeded",
+                    "message": "無料プランの1日あたりの利用回数を超えています。",
+                    "plan": plan,
+                    "limit": limit,
+                    "total": u.get("total", 0),
+                    "reset_at": reset_at,
+                }
+                append_jsonl(LOG_DIR / "usage.jsonl", {
+                    "event": "quota_exceeded",
+                    "user_key": user_key,
+                    "plan": plan,
+                    "limit": limit,
+                    "usage": u,
+                    "ts": now_ms(),
+                })
+                return jsonify(payload), 429
+
+            # まだ上限未満ならカウントをインクリメントして続行
+            u["total"] = u.get("total", 0) + 1
+            if kind == "generate":
+                u["generate"] = u.get("generate", 0) + 1
+            elif kind == "grade":
+                u["grade"] = u.get("grade", 0) + 1
+            usage[user_key] = u
+            _save_usage_for_today(usage)
+
+            append_jsonl(LOG_DIR / "usage.jsonl", {
+                "event": "quota_used",
+                "user_key": user_key,
+                "plan": plan,
+                "kind": kind,
+                "limit": limit,
+                "usage": u,
+                "ts": now_ms(),
+            })
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# =========================
 # バリデーション
 # =========================
 def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -387,12 +532,23 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     sa = payload["student_answer"]
     ma = payload.get("model_answer", "")
     difficulty = payload["difficulty"]
+
+    # ---- 変更：返却JSONに弱点タグ/次の一手/練習メニューを追加要求（既存キーは維持）----
     sysprompt = (
         "あなたは中学生の記述解答を採点する試験官です。"
         "採点は0〜10点の整数。"
+        "さらに『入試本番で満点（○）になる確率』を0〜100の整数で推定し、"
+        "短い根拠を perfect_probability_note に書いてください。"
+        "確率は『満点になる確率』なので、scoreが10でも100とは限りません（表現の曖昧さ・要点漏れの可能性を考慮）。"
         "出力は必ずJSONで、"
-        '{"score":int,"commentary":str,"model_answer":str,"reasons":[str]}。'
+        '{"score":int,"perfect_probability":int,"perfect_probability_note":str,'
+        '"commentary":str,"model_answer":str,"reasons":[str],'
+        '"weak_tags":[str],"next_steps":[str],"practice_menu":[str]}。'
         "commentary の冒頭に『10点中◯点』を必ず含める。"
+        "reasons は3〜6個、箇条書きの短文。"
+        "weak_tags は3つ以内（例：因果不足／用語不足／具体例不足／比較不足／要点不足／表現不明瞭）。"
+        "next_steps は1〜3個、必ず“行動”で書く（例：『原因→結果の順で書く』『用語Aを必ず入れる』『比較の軸（XとY）を明示』）。"
+        "practice_menu は1〜3個、すぐできる練習にする（例：『因果テンプレで30字にまとめる練習を3回』）。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
@@ -460,6 +616,14 @@ def status():
         "openai": {"ok": ok, "detail": detail, "checked_at": ms_to_iso(ts * 1000)},
         "novelty_threshold": NOVELTY_THRESHOLD,
         "max_stock": MAX_STOCK,
+        "quota": {
+            "free_daily_limit": FREE_DAILY_LIMIT,
+            "pro_daily_limit": PRO_DAILY_LIMIT,
+            "default_plan": DEFAULT_PLAN,
+        },
+        # 追加：採点観点も返せる（UI固定表示に使える）
+        "rubric": RUBRIC,
+        "rubric_hint": RUBRIC_HINT,
     }), 200
 
 @app.get("/env-check")
@@ -479,6 +643,9 @@ def env_check():
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
         "MAX_TOKENS_GRADE": MAX_TOKENS_GRADE,
+        "FREE_DAILY_LIMIT": FREE_DAILY_LIMIT,
+        "PRO_DAILY_LIMIT": PRO_DAILY_LIMIT,
+        "DEFAULT_PLAN": DEFAULT_PLAN,
     }), 200
 
 @app.post("/_probe-write")
@@ -500,6 +667,29 @@ def auth():
         resp.set_cookie("access_code", code, httponly=True, samesite="Lax", secure=is_secure)
         return resp
     return jsonify({"ok": False, "error": "invalid_code"}), 401
+
+# ---- 日次クォータの確認用API（UIからはまだ未使用）----
+@app.get("/api/usage")
+def api_usage():
+    """
+    現在のユーザー（IPまたはX-User-Id）の本日分の利用状況を返す。
+    将来、UI上に「今日 3/5 回」などを出したくなったらここを叩けばOK。
+    """
+    plan, limit = _plan_and_limit()
+    usage = _load_usage_for_today()
+    user_key = _get_user_key()
+    u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0}
+    remaining = None
+    if limit is not None:
+        remaining = max(0, limit - u.get("total", 0))
+    return jsonify({
+        "ok": True,
+        "plan": plan,
+        "limit": limit,
+        "usage": u,
+        "remaining": remaining,
+        "reset_at": _next_reset_iso(),
+    }), 200
 
 # =========================
 # ストック API
@@ -760,6 +950,7 @@ def stock_import():
 @app.post("/api/generate_question")
 @require_access_code
 @rate_limit
+@enforce_quota("generate")  # ← 日次クォータ適用
 def generate_question():
     t0 = time.time()
     err = ensure_openai()
@@ -844,9 +1035,78 @@ def generate_question():
 # =========================
 # 採点 API
 # =========================
+def _sanitize_str_list(x: Any, max_items: int, max_len: int) -> List[str]:
+    if not isinstance(x, list):
+        x = [x] if x is not None else []
+    out: List[str] = []
+    for a in x:
+        s = normalize_text(str(a))[:max_len]
+        if s and s not in out:
+            out.append(s)
+        if len(out) >= max_items:
+            break
+    return out
+
+def _infer_weak_tags_from_reasons(reasons: List[str]) -> List[str]:
+    joined = " ".join(reasons)
+    tags: List[str] = []
+
+    def add(t: str):
+        if t not in tags:
+            tags.append(t)
+
+    if any(k in joined for k in ["因果", "理由", "つなが", "だから"]):
+        add("因果不足")
+    if any(k in joined for k in ["用語", "語句", "キーワード", "重要語"]):
+        add("用語不足")
+    if any(k in joined for k in ["具体", "例", "説明が足り", "曖昧"]):
+        add("具体例不足")
+    if any(k in joined for k in ["比較", "比べ", "差", "どちら"]):
+        add("比較不足")
+    if any(k in joined for k in ["要点", "聞かれ", "主題", "結論"]):
+        add("要点不足")
+    if any(k in joined for k in ["表現", "日本語", "主語", "わかりにく"]):
+        add("表現不明瞭")
+
+    return tags[:3]
+
+def _fallback_next_steps(weak_tags: List[str]) -> List[str]:
+    steps: List[str] = []
+    if "因果不足" in weak_tags:
+        steps.append("原因→結果の順で1文にまとめる")
+    if "用語不足" in weak_tags:
+        steps.append("重要語句を1つ以上必ず入れる")
+    if "比較不足" in weak_tags:
+        steps.append("比較の軸（XとY）を明示して書く")
+    if "具体例不足" in weak_tags:
+        steps.append("具体例を1つ入れて説明する")
+    if "要点不足" in weak_tags:
+        steps.append("問われている結論を最初の1文に置く")
+    if "表現不明瞭" in weak_tags:
+        steps.append("主語を入れ、短い文に区切って書く")
+
+    if not steps:
+        steps = ["要点→理由の順で書く", "重要語句を入れる", "最後に結論を言い切る"]
+    return steps[:3]
+
+def _fallback_practice_menu(weak_tags: List[str]) -> List[str]:
+    menu: List[str] = []
+    if "因果不足" in weak_tags:
+        menu.append("因果テンプレ（原因→結果）で30〜50字にまとめる練習を3回")
+    if "用語不足" in weak_tags:
+        menu.append("重要語句リストから2語選び、必ず入れて書く練習を2回")
+    if "比較不足" in weak_tags:
+        menu.append("XとYを比べる一文（共通点/相違点）を書く練習を2回")
+    if "具体例不足" in weak_tags:
+        menu.append("具体例を1つ入れた説明文を作る練習を2回")
+    if not menu:
+        menu = ["30〜80字で『結論→理由』の型で書く練習を3回"]
+    return menu[:3]
+
 @app.post("/api/grade_answer")
 @require_access_code
 @rate_limit
+@enforce_quota("grade")  # ← 日次クォータ適用
 def grade_answer():
     t0 = time.time()
     err = ensure_openai()
@@ -888,15 +1148,51 @@ def grade_answer():
     if not commentary.startswith(head):
         commentary = f"{head}：{commentary}" if commentary else f"{head}。"
     reasons = result.get("reasons", [])
-    if not isinstance(reasons, list):
-        reasons = [str(reasons)]
+    reasons = _sanitize_str_list(reasons, max_items=8, max_len=200)
+
     model_ans = (result.get("model_answer", "") or data.get("model_answer", "")).strip()
+
+    # ✅ 満点（○）になる確率（0〜100）
+    prob_raw = result.get("perfect_probability", None)
+    prob_note = (result.get("perfect_probability_note", "") or "").strip()
+
+    prob: Optional[int] = None
+    if prob_raw is not None:
+        try:
+            digits = re.sub(r"[^0-9]", "", str(prob_raw))
+            prob = int(digits) if digits != "" else 0
+        except Exception:
+            prob = None
+
+    # モデルが返さなかった場合の保険（最低限の表示が出るように）
+    if prob is None:
+        prob = int(round(score * 10))  # 0〜100の簡易推定
+        if not prob_note:
+            prob_note = "スコアからの簡易推定"
+
+    prob = max(0, min(100, int(prob)))
+
+    # ---- 追加：弱点タグ / 次の一手 / 練習メニュー（返ってこなければサーバで補完） ----
+    weak_tags = _sanitize_str_list(result.get("weak_tags", []), max_items=3, max_len=40)
+    next_steps = _sanitize_str_list(result.get("next_steps", []), max_items=3, max_len=60)
+    practice_menu = _sanitize_str_list(result.get("practice_menu", []), max_items=3, max_len=80)
+
+    if not weak_tags:
+        weak_tags = _infer_weak_tags_from_reasons(reasons)
+    if not next_steps:
+        next_steps = _fallback_next_steps(weak_tags)
+    if not practice_menu:
+        practice_menu = _fallback_practice_menu(weak_tags)
 
     append_jsonl(LOG_DIR / "grading.jsonl", {
         "event": "graded",
         "question": data["question"],
         "student_answer": data["student_answer"],
         "score": score,
+        "perfect_probability": prob,
+        "weak_tags": weak_tags,
+        "next_steps": next_steps,
+        "practice_menu": practice_menu,
         "ts": now_ms()
     })
 
@@ -906,7 +1202,16 @@ def grade_answer():
         "score": score,
         "commentary": commentary,
         "model_answer": model_ans,
-        "reasons": reasons
+        "reasons": reasons,
+        "perfect_probability": prob,
+        "perfect_probability_note": prob_note,
+        "max_score": 10,
+        # 追加返却（UI側で順次表示できる）
+        "weak_tags": weak_tags,
+        "next_steps": next_steps,
+        "practice_menu": practice_menu,
+        "rubric": RUBRIC,
+        "rubric_hint": RUBRIC_HINT,
     }), 200
 
 # =========================
@@ -1001,5 +1306,6 @@ def set_model():
 
 # ---- エントリポイント ----
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "5000"))
+    # ★変更：デフォルトを 5001 に（PORT未指定のとき）
+    port = int(os.getenv("PORT", "5001"))
     app.run(host="0.0.0.0", port=port, debug=env_bool("DEBUG"))

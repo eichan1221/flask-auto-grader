@@ -60,8 +60,59 @@
     .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
     .caps{font-variant:all-small-caps;letter-spacing:.04em}
     .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
+
+    /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
     :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
+
+    /* model 表示は非表示に */
     #modelTag{ display:none; }
+
+    /* =========================
+       使い方モーダル（小ウィンドウ）
+       ========================= */
+    .modal{
+      position:fixed; inset:0; z-index:999;
+      display:none; align-items:center; justify-content:center;
+      padding:16px;
+      background:rgba(17,24,39,0.35);
+      backdrop-filter: blur(4px);
+    }
+    .modal.show{ display:flex; }
+    .modal .panel{
+      width:min(920px, 96vw);
+      max-height:86vh;
+      overflow:auto;
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:18px;
+      box-shadow:0 16px 60px rgba(0,0,0,0.18);
+      padding:16px;
+    }
+    .modal .panelHeader{
+      display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+      position:sticky; top:0; background:rgba(255,255,255,0.92);
+      backdrop-filter:saturate(180%) blur(8px);
+      border-bottom:1px solid var(--border);
+      padding:8px 8px 10px;
+      border-radius:14px;
+    }
+    .modal .panelTitle{ margin:0; font-size:18px; }
+    .modal .panelBody{ padding:10px 6px 6px; }
+    .callout{
+      background:linear-gradient(180deg,#fff7ff,#f5fbff);
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:10px 12px;
+    }
+    .step{
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      background:#fff;
+    }
+    .step h3{ margin:0 0 6px; font-size:15px; }
+    .step ol, .step ul{ margin:8px 0 0; padding-left:18px; line-height:1.75; }
+    .step .mini{ font-size:12px; color:var(--muted); margin-top:6px; }
   </style>
 </head>
 <body>
@@ -71,7 +122,12 @@
         <h1>記述式API（個人運用UI）</h1>
         <span id="modelTag" class="tag" aria-hidden="true">model: ...</span>
       </div>
-      <div class="flex">
+      <div class="flex" style="gap:8px;align-items:center">
+        <span id="usageBadge" class="pill small" aria-live="polite"></span>
+
+        <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
+        <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
+
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
       </div>
@@ -79,45 +135,8 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
-    <div class="card" id="howtoCard">
-      <h2>使い方（かんたんガイド）</h2>
-      <div class="small muted" style="margin-bottom:6px">※見た目は固定のまま、機能説明のみを表示しています。</div>
-      <ol style="line-height:1.7;margin:0;padding-left:18px">
-        <li><b>初期設定（必要な場合のみ）</b>：右上の「設定」から
-          <span class="tag">API Base URL</span> と <span class="tag">ACCESS_CODE</span> を入力→「保存」→「再読込」。
-          右上の <span class="tag">model: …</span> にモデル名が表示されれば接続OKです。
-        </li>
-        <li><b>出題を自動生成</b>：左カラムの ①
-          <ul style="margin:6px 0 0 14px;padding-left:0">
-            <li>科目タブで <b>社会/理科</b> を選択（理科は<b>学年</b>も選択）。<span class="small muted">※「天体」は中3のみ</span></li>
-            <li><b>分類・難易度・分量・方向性・避ける話題</b>を設定し、必要なら<b>ヒントを含める</b>にチェック。</li>
-            <li>「<b>問題を自動生成</b>」を押すと、結果が表示されストックにも保存されます。
-              類似がある場合は「<span class="small muted">ストック内の類似: …</span>」が出ます。</li>
-          </ul>
-        </li>
-        <li><b>ストックの活用</b>：左下の「ストック（最新10件）」から
-          <b>この問題を使う</b>で右カラムの採点対象にセット。必要に応じて
-          <span class="tag">stocks.json</span>/<span class="tag">stocks.csv</span> をエクスポートできます。
-          <span class="small muted">（上限10件、古いものから自動削除）</span>
-        </li>
-        <li><b>採点</b>：右カラムの ②
-          <ul style="margin:6px 0 0 14px;padding-left:0">
-            <li>対象問題を確認し、必要なら<b>模範解答を渡す</b>や<b>ヒントを表示</b>をON。</li>
-            <li>解答を入力し、配点（5点/10点）を選んで<b>採点する</b>。
-              「10点中◯点」＋講評・理由・参考の模範解答が表示されます。</li>
-            <li>採点ログは <span class="tag">grading.jsonl</span> としてエクスポートできます。</li>
-          </ul>
-        </li>
-        <li><b>エラー対処</b>：
-          <ul style="margin:6px 0 0 14px;padding-left:0">
-            <li><b>403 Forbidden</b>：<span class="tag">ACCESS_CODE</span> が未設定/不一致。設定画面で入力してください。</li>
-            <li><b>CORSエラー</b>：デプロイ先の <span class="mono">ALLOWED_ORIGIN</span> にこのUIのURLを含めてください。</li>
-            <li><b>OpenAI API error</b>：サーバの <span class="mono">/status</span> で疎通確認（認証要）。</li>
-          </ul>
-        </li>
-      </ol>
-    </div>
 
+    <!-- 設定 -->
     <div class="card" id="settingsCard" style="display:none">
       <h2>接続設定</h2>
       <div class="grid-2">
@@ -140,6 +159,7 @@
     </div>
 
     <div class="row" style="margin-top:12px">
+      <!-- 左：生成 & ストック -->
       <section class="card">
         <div class="toolbar">
           <h2>① 出題の生成 & ストック</h2>
@@ -210,22 +230,51 @@
               <span id="dupNote" class="small"></span>
             </div>
             <div id="hintBox" class="hint" style="display:none;margin-top:10px">
-              <div><span class="caps">模範解答</span><div id="genModelAnswer" class="mono"></div></div>
+              <div style="margin-bottom:6px">
+                <button class="btn small" id="btnToggleGenModel" type="button">模範解答を表示</button>
+                <div id="genModelAnswerWrap" style="display:none;margin-top:4px">
+                  <span class="caps">模範解答</span>
+                  <div id="genModelAnswer" class="mono"></div>
+                </div>
+              </div>
               <div class="divider"></div>
-              <div><span class="caps">解説</span><div id="genExplanation"></div></div>
+              <div style="margin:6px 0">
+                <button class="btn small" id="btnToggleGenExpl" type="button">解説を表示</button>
+                <div id="genExplanationWrap" style="display:none;margin-top:4px">
+                  <span class="caps">解説</span>
+                  <div id="genExplanation"></div>
+                </div>
+              </div>
               <div class="divider"></div>
-              <div><span class="caps">出題意図</span><div id="genIntention"></div></div>
+              <div style="margin-top:6px">
+                <button class="btn small" id="btnToggleGenIntn" type="button">出題意図を表示</button>
+                <div id="genIntentionWrap" style="display:none;margin-top:4px">
+                  <span class="caps">出題意図</span>
+                  <div id="genIntention"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         <div style="margin-top:16px">
           <h3>ストック（最新10件）</h3>
+
+          <!-- ✅ 追加（レイアウトは維持）：検索・ランダム -->
+          <div class="flex" style="gap:8px;margin:8px 0 6px">
+            <input type="text" id="stockSearch" placeholder="ストック検索（キーワード）" style="flex:1;min-width:220px" maxlength="120">
+            <button class="btn" id="btnStockSearch">検索</button>
+            <button class="btn" id="btnStockClearSearch">クリア</button>
+            <button class="btn" id="btnStockRandom" title="条件に合うストックから1問ランダムに選びます">ランダム</button>
+          </div>
+          <div class="small muted" id="stockSearchInfo"></div>
+
           <div class="list" id="stockList"></div>
           <div class="small muted" id="stockCount"></div>
         </div>
       </section>
 
+      <!-- 右：採点 -->
       <section class="card">
         <div class="toolbar">
           <h2>② 採点</h2>
@@ -240,11 +289,29 @@
             <label class="pill"><input type="checkbox" id="showCurrentHints"> ヒントを表示</label>
           </div>
           <div id="currentHintBox" class="hint" style="display:none;margin-top:8px">
-            <div><span class="caps">模範解答</span><div id="currentModel" class="mono"></div></div>
+            <div style="margin-bottom:6px">
+              <button class="btn small" id="btnToggleCurModel" type="button">模範解答を表示</button>
+              <div id="currentModelWrap" style="display:none;margin-top:4px">
+                <span class="caps">模範解答</span>
+                <div id="currentModel" class="mono"></div>
+              </div>
+            </div>
             <div class="divider"></div>
-            <div><span class="caps">解説</span><div id="currentExpl"></div></div>
+            <div style="margin:6px 0">
+              <button class="btn small" id="btnToggleCurExpl" type="button">解説を表示</button>
+              <div id="currentExplWrap" style="display:none;margin-top:4px">
+                <span class="caps">解説</span>
+                <div id="currentExpl"></div>
+              </div>
+            </div>
             <div class="divider"></div>
-            <div><span class="caps">出題意図</span><div id="currentIntn"></div></div>
+            <div style="margin-top:6px">
+              <button class="btn small" id="btnToggleCurIntn" type="button">出題意図を表示</button>
+              <div id="currentIntnWrap" style="display:none;margin-top:4px">
+                <span class="caps">出題意図</span>
+                <div id="currentIntn"></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -256,6 +323,7 @@
           <select id="gradeDifficulty">
             <option>5点</option>
             <option selected>10点</option>
+            <option>満点</option>
           </select>
           <button class="btn brand" id="btnGrade">採点する</button>
           <button class="btn" id="btnClearAnswer">クリア</button>
@@ -265,6 +333,10 @@
           <h3>採点結果</h3>
           <div class="qcard">
             <div id="scoreLine" class="success" style="font-weight:700"></div>
+
+            <!-- ✅ 追加（レイアウト維持）：満点確率表示 -->
+            <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
+
             <div id="commentary" style="margin:6px 0 8px"></div>
             <div class="small muted">理由</div>
             <ul id="reasons" style="margin-top:4px"></ul>
@@ -277,9 +349,161 @@
     </div>
   </main>
 
+  <!-- =========================
+       ✅ 使い方説明モーダル（小ウィンドウ）
+       ========================= -->
+  <div class="modal" id="howtoModal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="howtoTitle">
+      <div class="panelHeader">
+        <div>
+          <h2 class="panelTitle" id="howtoTitle">使い方説明（はじめての方向け）</h2>
+          <div class="small muted">迷ったらこの画面を開いて、上から順番に進めてください。</div>
+        </div>
+        <div class="flex" style="gap:8px">
+          <button class="btn" id="btnHowtoClose" aria-label="使い方説明を閉じる">閉じる</button>
+        </div>
+      </div>
+
+      <div class="panelBody">
+        <div class="callout">
+          <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
+          <ul style="margin:0;padding-left:18px;line-height:1.8">
+            <li><b>出題（記述問題）の自動生成</b>：社会/理科の記述問題を、入試・定期テスト想定で作れます。</li>
+            <li><b>採点（10点満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答を返します。</li>
+            <li><b>ストック保存</b>：生成した問題を最大10件まで保存し、あとで呼び出して使えます。</li>
+            <li><b>エクスポート</b>：stocks / grading のデータを書き出し、バックアップや共有に使えます。</li>
+          </ul>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div class="step">
+          <h3>0. まず最初に：接続設定（必要な人だけ）</h3>
+          <ol>
+            <li>右上の <b>「設定」</b> をクリックします。</li>
+            <li><b>API Base URL</b>：
+              <ul>
+                <li>同じサーバー内でUIを配っているなら <b>空欄のまま</b> でOKです。</li>
+                <li>別URLのAPIに繋ぐなら、例のように <span class="mono">https://xxxx.onrender.com</span> の形で入力します。</li>
+              </ul>
+            </li>
+            <li><b>ACCESS_CODE</b>：
+              <ul>
+                <li>サーバー側でACCESS_CODEを設定している場合はここに入力します（未設定なら空でOK）。</li>
+                <li>これが合っていないと <b>403 Forbidden</b> になります。</li>
+              </ul>
+            </li>
+            <li><b>保存</b> → 右上の <b>再読込</b> を押して反映します。</li>
+          </ol>
+          <div class="mini">よくある失敗：URLの末尾に <span class="mono">/</span> が入っていて二重スラッシュになる → つながらない、など。</div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="step">
+          <h3>1. 出題を自動生成する（左側：① 出題の生成）</h3>
+          <ol>
+            <li>上のタブで <b>社会</b> / <b>理科</b> を選びます。</li>
+            <li><b>分類</b> を選びます：
+              <ul>
+                <li>社会：地理 / 歴史</li>
+                <li>理科：生物 / 化学 / 地学 / 物理 / 天体（※天体は中3のみ）</li>
+              </ul>
+            </li>
+            <li>理科の場合は <b>学年</b> も選びます（中1/中2/中3）。</li>
+            <li><b>難易度/配点</b> を選びます（5点/10点/満点）。</li>
+            <li><b>出題の方向性</b>（任意）：例）「制度」「文化」「因果関係」「比較」など。</li>
+            <li><b>避ける話題</b>（任意）：例）「稲作は避けたい」など、偏り防止に使えます。</li>
+            <li><b>問題を自動生成</b> を押します。</li>
+          </ol>
+          <div class="mini">
+            生成結果が出たら「この問題で採点へ」で右側の採点対象にセットできます。<br>
+            「ヒントを表示」をONにすると、模範解答・解説・出題意図を確認できます（必要な時だけ開く設計です）。
+          </div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="step">
+          <h3>2. ストックを使う（左下：ストック一覧）</h3>
+          <ol>
+            <li>ストック（最新10件）には、生成した問題が自動で保存されます。</li>
+            <li>使いたい問題の <b>「この問題を使う」</b> を押すと、右側の「対象問題」にセットされます。</li>
+            <li>追加機能：
+              <ul>
+                <li><b>検索</b>：キーワードでストックを絞り込みできます。</li>
+                <li><b>ランダム</b>：ストックから1問ランダムに選んで採点対象にできます。</li>
+              </ul>
+            </li>
+            <li>ストックを外部保存したい場合：
+              <ul>
+                <li><b>stocks.json</b>：データの完全バックアップ（他サーバーへの移行にも向きます）</li>
+                <li><b>stocks.csv</b>：Excelで見やすい形式（一覧確認・編集に便利）</li>
+              </ul>
+            </li>
+          </ol>
+          <div class="mini">※ストックは上限10件。古いものから自動で消える設計です（運用で増やすことも可能）。</div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="step">
+          <h3>3. 採点する（右側：② 採点）</h3>
+          <ol>
+            <li>まず <b>対象問題</b> に問題が入っているか確認します（空なら左のストックから選ぶ or 生成します）。</li>
+            <li>必要に応じて：
+              <ul>
+                <li><b>採点に模範解答も渡す（安定化）</b>：ONにすると部分点や表現ゆれの判断が安定しやすいです。</li>
+                <li><b>ヒントを表示</b>：問題の意図や模範解答を確認したいときだけON。</li>
+              </ul>
+            </li>
+            <li>解答欄に、生徒の解答を入力します（目安30〜80字）。</li>
+            <li>右下の <b>採点する</b> を押します。</li>
+            <li>結果として <b>10点中◯点</b>、講評、理由、参考模範解答が表示されます。</li>
+          </ol>
+          <div class="mini">
+            追加表示：<b>満点（○）になる確率</b> も出ます（表現の曖昧さ・要点漏れの可能性も加味した目安）。<br>
+            「クリア」は解答欄と表示結果だけを消します（問題そのものは消えません）。
+          </div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="step">
+          <h3>4. ログやエクスポート（記録を残したいとき）</h3>
+          <ul style="line-height:1.85">
+            <li><b>grading.jsonl</b>：採点履歴のログです（いつ・どの問題を採点したかが残ります）。</li>
+            <li><b>logs.zip</b>（URL直打ちで取得）：運用・不具合調査用のログ一式です。管理者が原因調査するときに使います。</li>
+          </ul>
+          <div class="mini">
+            logs.zip はUIにボタンを置いていない場合でも、サーバー側に機能があります。<br>
+            例：<span class="mono">https://あなたのURL/logs.zip</span>（ACCESS_CODE設定時は必要）
+          </div>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div class="step">
+          <h3>よくあるエラーと対処</h3>
+          <ul style="line-height:1.85">
+            <li><b>403 Forbidden</b>：ACCESS_CODEが未入力/違う → 設定画面で正しい値を入力して保存。</li>
+            <li><b>CORSエラー</b>：API側の <span class="mono">ALLOWED_ORIGIN</span> にUIのURLが入っていない → サーバー環境変数を修正。</li>
+            <li><b>OpenAI API error</b>：サーバー側のAPIキー/モデル設定が原因 → <span class="mono">/status</span>（認証あり）で確認。</li>
+            <li><b>quota_exceeded</b>：無料回数上限 → 翌日リセット、もしくは上限設定を変更。</li>
+          </ul>
+        </div>
+
+        <div class="small muted" style="margin-top:10px">
+          ヒント：このモーダルは <span class="kbd">Esc</span> でも閉じられます。背景クリックでも閉じます。
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
+    // ---- 設定の永続化 ----
     const $ = (q)=>document.querySelector(q);
     const cfg = {
       get baseUrl(){ return localStorage.getItem('baseUrl') || ''; },
@@ -289,6 +513,7 @@
       endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
     };
 
+    // ---- 共通Fetch ----
     async function apiGet(path){
       const headers = {};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -296,28 +521,54 @@
       if(!res.ok){
         if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
         let msg = `${res.status} ${res.statusText}`;
-        try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
-        if(res.status === 429) msg += '（連続操作が多すぎます。少し待って再実行）';
-        if(res.status === 503) msg += '（サーバ側でOpenAI設定未完了の可能性）';
-        if(res.status === 502) msg += '（OpenAI側エラー/上限の可能性）';
+        try {
+          const j = await res.json();
+          if(j && j.error){ msg += `: ${j.error}`; }
+          if(j && j.message && !msg.includes(j.message)){ msg += ` / ${j.message}`; }
+        } catch(e){}
         throw new Error(msg);
       }
-      return res.json();
+      try{
+        return await res.json();
+      }catch(e){
+        return {};
+      }
     }
+
     async function apiPost(path, body){
       const headers = {'Content-Type':'application/json'};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {method:'POST', headers, body: JSON.stringify(body||{})});
-      if(!res.ok){
-        if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
-        let msg = `${res.status} ${res.statusText}`;
-        try { const j = await res.json(); if(j.error) msg += `: ${j.error}`; } catch(e){}
-        if(res.status === 429) msg += '（連続操作が多すぎます。少し待って再実行）';
-        if(res.status === 503) msg += '（サーバ側でOpenAI設定未完了の可能性）';
-        if(res.status === 502) msg += '（OpenAI側エラー/上限の可能性）';
-        throw new Error(msg);
+      let data = null;
+      try{
+        data = await res.json();
+      }catch(e){
+        data = null;
       }
-      return res.json();
+      if(!res.ok){
+        // quota_exceeded（429）の場合は専用扱い
+        if(res.status === 429 && data && data.error === 'quota_exceeded'){
+          const err = new Error(data.message || '無料プランの1日あたりの利用回数を超えています。');
+          err.code = 'quota_exceeded';
+          err.status = 429;
+          throw err;
+        }
+        if(res.status === 403){
+          const err = new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
+          err.code = 'forbidden';
+          err.status = 403;
+          throw err;
+        }
+        let msg = `${res.status} ${res.statusText}`;
+        if(data){
+          if(data.error) msg += `: ${data.error}`;
+          if(data.message && !msg.includes(data.message)) msg += ` / ${data.message}`;
+        }
+        const err = new Error(msg);
+        err.status = res.status;
+        throw err;
+      }
+      return data || {};
     }
 
     function toast(msg, ok=true){
@@ -328,11 +579,24 @@
       setTimeout(()=>t.classList.remove('show'), 2200);
     }
 
+    function buildQueryString(params){
+      const sp = new URLSearchParams();
+      Object.entries(params || {}).forEach(([k,v])=>{
+        if(v === undefined || v === null) return;
+        const s = String(v).trim();
+        if(!s) return;
+        sp.set(k, s);
+      });
+      const qs = sp.toString();
+      return qs ? `?${qs}` : '';
+    }
+
+    // ---- UI状態 ----
     let subject = '社会';
     let currentItem = null;
     let generatedRaw = null;
-    let lastIncludeHints = false;
 
+    // ---- 設定UI ----
     function loadSettings(){
       $('#baseUrl').value = cfg.baseUrl;
       $('#accessCode').value = cfg.accessCode;
@@ -344,6 +608,7 @@
       setTimeout(()=>$('#statusLine').textContent='', 1500);
     }
 
+    // ---- 学年とカテゴリの整合（理科：天体は中3のみ）----
     function applyScienceConstraints(){
       if(subject!=='理科') return;
       const g = $('#grade').value;
@@ -358,15 +623,59 @@
       });
     }
 
+    // ---- 利用状況バッジ ----
+    async function refreshUsage(){
+      const badge = $('#usageBadge');
+      if(!badge) return;
+      try{
+        const r = await apiGet('/api/usage');
+        if(!r || !r.ok){
+          badge.textContent = '';
+          return;
+        }
+        const limit = r.limit;
+        const usage = r.usage || {};
+        const total = usage.total ?? 0;
+        if(limit == null){
+          badge.textContent = `本日の利用: ${total} 回（制限なし）`;
+        }else{
+          badge.textContent = `本日の利用: ${total} / ${limit} 回`;
+        }
+      }catch(e){
+        // 失敗時は静かに何もしない
+      }
+    }
+
+    // ---- 使い方モーダル ----
+    function openHowto(){
+      const m = $('#howtoModal');
+      m.classList.add('show');
+      m.setAttribute('aria-hidden','false');
+      // フォーカスを「閉じる」に移す（キーボードでも迷わない）
+      setTimeout(()=>{ $('#btnHowtoClose').focus(); }, 0);
+    }
+    function closeHowto(){
+      const m = $('#howtoModal');
+      m.classList.remove('show');
+      m.setAttribute('aria-hidden','true');
+      // 開いたボタンにフォーカスを戻す
+      setTimeout(()=>{ $('#btnHowto').focus(); }, 0);
+    }
+
+    // ---- 初期化 ----
     async function boot(){
       loadSettings();
-      try{ await apiGet('/api/model'); }catch(e){}
+      try{
+        await apiGet('/api/model');
+      }catch(e){}
       await refreshStock();
       updateSubjectTabs();
       applyScienceConstraints();
       $('#settingsCard').style.display = 'none';
+      refreshUsage();
     }
 
+    // ---- 生成UIロジック ----
     function updateSubjectTabs(){
       document.querySelectorAll('.tab').forEach(el=>{
         el.classList.toggle('active', el.dataset.subject === subject);
@@ -398,21 +707,29 @@
         include_hints: $('#includeHints').checked,
         length_hint: $('#lengthHint').value || '30〜80字程度',
       };
-      lastIncludeHints = payload.include_hints;
-
       const btn = $('#btnGenerate');
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '生成中…';
       try{
         const res = await apiPost('/api/generate_question', payload);
         generatedRaw = res;
         let item = res.item || res.generated || {};
-        currentItem = item;
+        if(res.item && res.item.question){
+          currentItem = res.item;
+        }else{
+          currentItem = item;
+        }
         renderGenerated(item, res.duplicate_of);
         await refreshStock();
+        await refreshUsage();
         toast('問題を生成しました');
       }catch(e){
         console.error(e);
-        toast('生成に失敗しました: ' + e.message, false);
+        if(e.code === 'quota_exceeded'){
+          toast(e.message || '無料プランの1日あたりの利用回数を超えました', false);
+        }else{
+          toast('生成に失敗しました: ' + e.message, false);
+        }
+        refreshUsage();
       }finally{
         btn.disabled = false; btn.textContent = txt;
       }
@@ -421,54 +738,46 @@
     function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
-
+      $('#genModelAnswer').textContent = item.model_answer || '';
+      $('#genExplanation').textContent = item.explanation || '';
+      $('#genIntention').textContent = item.intention || '';
+      const tags = item.tags || [];
       const meta = [];
       if(item.subject) meta.push(item.subject);
       if(item.category) meta.push(item.category);
       if(item.grade) meta.push(item.grade);
       if(item.difficulty) meta.push(item.difficulty);
       $('#genMeta').textContent = meta.join(' / ');
-
       const tagsBox = $('#genTags'); tagsBox.innerHTML='';
-      (item.tags || []).forEach(t=>{
+      tags.forEach(t=>{
         const s=document.createElement('span'); s.className='tag'; s.textContent=t; tagsBox.appendChild(s);
       });
       $('#dupNote').textContent = dupOf ? `（注）ストック内の類似: ${dupOf}` : '';
 
-      // includeHints OFFなら、重複でもヒントを出さない
-      const showHints = lastIncludeHints && $('#toggleHints').checked;
-      $('#genModelAnswer').textContent = lastIncludeHints ? (item.model_answer || '') : '';
-      $('#genExplanation').textContent = lastIncludeHints ? (item.explanation || '') : '';
-      $('#genIntention').textContent = lastIncludeHints ? (item.intention || '') : '';
-      $('#hintBox').style.display = showHints ? '' : 'none';
+      $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
+      $('#genModelAnswerWrap').style.display = 'none';
+      $('#genExplanationWrap').style.display = 'none';
+      $('#genIntentionWrap').style.display = 'none';
     }
 
+    // ---- ストック一覧（list / search 対応） ----
     async function refreshStock(){
+      const q = ($('#stockSearch')?.value || '').trim();
+      const info = $('#stockSearchInfo');
       try{
-        const r = await apiGet('/api/stock/list');
-        const list = $('#stockList'); list.innerHTML='';
-        r.items.forEach(it=>{
-          const div=document.createElement('div'); div.className='item';
-
-          const topWrap=document.createElement('div');
-          topWrap.className='small muted';
-          topWrap.textContent = `${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}`;
-
-          const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
-
-          const actions=document.createElement('div'); actions.className='flex';
-          const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
-          useBtn.onclick=()=>{ useStock(it); };
-          actions.appendChild(useBtn);
-          if(cfg.accessCode){
-            const del=document.createElement('button'); del.className='btn err'; del.textContent='削除';
-            del.onclick=()=>deleteStock(it.id);
-            actions.appendChild(del);
-          }
-          div.appendChild(topWrap); div.appendChild(q); div.appendChild(actions);
-          list.appendChild(div);
-        });
-        $('#stockCount').textContent = `件数: ${r.count} / 上限 ${r.limit}`;
+        let r;
+        if(q){
+          // 検索（/api/stock/search）
+          const qs = buildQueryString({ q, limit: 50, offset: 0 });
+          r = await apiGet('/api/stock/search' + qs);
+          info.textContent = `検索中："${q}"（ヒット ${r.total ?? (r.items||[]).length} 件）`;
+          renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length });
+        }else{
+          // 通常（/api/stock/list）
+          r = await apiGet('/api/stock/list');
+          info.textContent = '';
+          renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count });
+        }
       }catch(e){
         console.error(e);
         const list = $('#stockList'); list.innerHTML='';
@@ -476,6 +785,45 @@
         errDiv.className = 'small danger';
         errDiv.textContent = '取得に失敗: ' + e.message;
         list.appendChild(errDiv);
+        $('#stockCount').textContent = '';
+        if(info) info.textContent = '';
+      }
+    }
+
+    function renderStockList(items, meta){
+      const list = $('#stockList'); list.innerHTML='';
+      items.forEach(it=>{
+        const div=document.createElement('div'); div.className='item';
+
+        const topWrap=document.createElement('div');
+        topWrap.className='small muted';
+        topWrap.textContent = `${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}`;
+
+        const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
+
+        const actions=document.createElement('div'); actions.className='flex';
+        const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
+        useBtn.onclick=()=>{ useStock(it); };
+        actions.appendChild(useBtn);
+
+        // delete は ACCESS_CODE 設定時のみ表示（既存仕様を維持）
+        if(cfg.accessCode){
+          const del=document.createElement('button'); del.className='btn err'; del.textContent='削除';
+          del.onclick=()=>deleteStock(it.id);
+          actions.appendChild(del);
+        }
+
+        div.appendChild(topWrap); div.appendChild(q); div.appendChild(actions);
+        list.appendChild(div);
+      });
+
+      const count = meta?.count ?? items.length;
+      const limit = meta?.limit ?? '';
+      const total = meta?.total ?? count;
+      if(limit !== ''){
+        $('#stockCount').textContent = `表示: ${count} 件 / 全体 ${total} 件（上限 ${limit}）`;
+      }else{
+        $('#stockCount').textContent = `表示: ${count} 件 / 全体 ${total} 件`;
       }
     }
 
@@ -490,17 +838,43 @@
       }
     }
 
+    async function stockRandom(){
+      // 検索欄が入っていれば q を使う（無ければ全体からランダム）
+      const q = ($('#stockSearch')?.value || '').trim();
+      const qs = buildQueryString({ q });
+      try{
+        const r = await apiGet('/api/stock/random' + qs);
+        if(r && r.ok && r.item){
+          useStock(r.item);
+          toast('ランダムで1問選びました');
+        }else{
+          toast('候補が見つかりませんでした', false);
+        }
+      }catch(e){
+        toast('ランダム取得に失敗: ' + e.message, false);
+      }
+    }
+
     function useStock(it){
       currentItem = it;
       $('#currentQuestionText').textContent = it.question || '';
       $('#currentModel').textContent = it.model_answer || '';
       $('#currentExpl').textContent = it.explanation || '';
       $('#currentIntn').textContent = it.intention || '';
+
       $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
+      $('#currentModelWrap').style.display = 'none';
+      $('#currentExplWrap').style.display = 'none';
+      $('#currentIntnWrap').style.display = 'none';
+
+      $('#studentAnswer').value = '';
+      $('#gradeResult').style.display = 'none';
+
       window.scrollTo({top:0,behavior:'smooth'});
       toast('採点対象にセットしました');
     }
 
+    // ---- 採点 ----
     async function handleGrade(){
       if(!currentItem || !currentItem.question){
         toast('先に問題を選ぶか生成してください', false); return;
@@ -528,15 +902,35 @@
         (r.reasons||[]).forEach(s=>{
           const li=document.createElement('li'); li.textContent=s; ul.appendChild(li);
         });
+
+        // ✅ 追加：満点（○）になる確率表示
+        const prob = (r.perfect_probability ?? null);
+        const note = (r.perfect_probability_note ?? '').toString().trim();
+        const line = $('#perfectProbLine');
+        if(line){
+          if(prob === null || prob === undefined){
+            line.textContent = '';
+          }else{
+            line.textContent = `満点（○）になる確率: ${prob}%${note ? `（${note}）` : ''}`;
+          }
+        }
+
+        await refreshUsage();
         toast('採点しました');
       }catch(e){
         console.error(e);
-        toast('採点に失敗: ' + e.message, false);
+        if(e.code === 'quota_exceeded'){
+          toast(e.message || '無料プランの1日あたりの利用回数を超えました', false);
+        }else{
+          toast('採点に失敗しました: ' + e.message, false);
+        }
+        refreshUsage();
       }finally{
         btn.disabled = false; btn.textContent = txt;
       }
     }
 
+    // ---- エクスポート（ヘッダー付きDL）----
     async function downloadEndpoint(path, filename){
       const headers = {};
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -549,6 +943,7 @@
       a.remove(); URL.revokeObjectURL(url);
     }
 
+    // ---- イベント結線 ----
     document.addEventListener('click', (e)=>{
       if(e.target.closest('.tab')){
         subject = e.target.closest('.tab').dataset.subject;
@@ -564,15 +959,57 @@
 
     $('#btnGenerate').onclick = handleGenerate;
     $('#toggleHints').onchange = ()=> {
-      const showHints = lastIncludeHints && $('#toggleHints').checked;
-      $('#hintBox').style.display = showHints ? '' : 'none';
+      const on = $('#toggleHints').checked;
+      $('#hintBox').style.display = on ? '' : 'none';
+      if(!on){
+        $('#genModelAnswerWrap').style.display = 'none';
+        $('#genExplanationWrap').style.display = 'none';
+        $('#genIntentionWrap').style.display = 'none';
+      }
     };
+
+    $('#btnToggleGenModel').onclick = ()=>{
+      const w = $('#genModelAnswerWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+    $('#btnToggleGenExpl').onclick = ()=>{
+      const w = $('#genExplanationWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+    $('#btnToggleGenIntn').onclick = ()=>{
+      const w = $('#genIntentionWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+
     $('#btnUseForGrading').onclick = ()=>{
       if(!generatedRaw){ toast('先に生成してください', false); return; }
       const item = (generatedRaw.item || generatedRaw.generated);
       useStock(item);
     };
-    $('#showCurrentHints').onchange = ()=> $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
+
+    $('#showCurrentHints').onchange = ()=>{
+      const on = $('#showCurrentHints').checked;
+      $('#currentHintBox').style.display = on ? '' : 'none';
+      if(!on){
+        $('#currentModelWrap').style.display = 'none';
+        $('#currentExplWrap').style.display = 'none';
+        $('#currentIntnWrap').style.display = 'none';
+      }
+    };
+
+    $('#btnToggleCurModel').onclick = ()=>{
+      const w = $('#currentModelWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+    $('#btnToggleCurExpl').onclick = ()=>{
+      const w = $('#currentExplWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+    $('#btnToggleCurIntn').onclick = ()=>{
+      const w = $('#currentIntnWrap');
+      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
+    };
+
     $('#btnGrade').onclick = handleGrade;
     $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; $('#gradeResult').style.display='none'; };
 
@@ -585,6 +1022,26 @@
     $('#btnSaveSettings').onclick = ()=> { saveSettings(); boot(); };
     $('#btnReload').onclick = boot;
 
+    // ✅ ストック検索・クリア・ランダム
+    $('#btnStockSearch').onclick = ()=> refreshStock();
+    $('#btnStockClearSearch').onclick = ()=>{ $('#stockSearch').value=''; refreshStock(); };
+    $('#btnStockRandom').onclick = stockRandom;
+    $('#stockSearch').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ refreshStock(); e.preventDefault(); }
+    });
+
+    // ✅ 使い方モーダルの開閉
+    $('#btnHowto').onclick = openHowto;
+    $('#btnHowtoClose').onclick = closeHowto;
+    $('#howtoModal').addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget) closeHowto(); // 背景クリックで閉じる
+    });
+    document.addEventListener('keydown', (e)=>{
+      const m = $('#howtoModal');
+      if(e.key === 'Escape' && m.classList.contains('show')) closeHowto();
+    });
+
+    // 起動
     boot();
   </script>
 </body>

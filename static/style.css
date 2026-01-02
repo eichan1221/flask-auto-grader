@@ -1,212 +1,108 @@
-/* =========================
-   static/style.css  (修正版 最終)
-   ※ レイアウトは変更しません
-   ========================= */
-
-/* Reset (最小限) */
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-
-/* 変数（index.html内の<style>が後勝ち） */
 :root{
-  /* 既存のこのCSS内で使用する基本色 */
-  --text-dark:#111827;
-  --muted:#6b7280;
-  --card:#ffffff;
-  --border:#e5e7eb;
-  --pastel-bg:#f5f3ff;
-  --pastel-accent:#e9d5ff;
-  --pastel-accent-strong:#c4b5fd;
-  --primary:#a78bfa;
-  --primary-strong:#7c3aed;
-
-  --success:#22c55e;
-  --success-bg:#eafaf0;
-  --danger:#ef4444;
-  --danger-bg:#fee2e2;
-
-  /* index.html 側の変数名と相互補完（片方が未定義でも見た目が破綻しない） */
-  --ink: var(--text-dark, #1f2937);
-  --brand: var(--primary, #a78bfa);
-  --brand-strong: var(--primary-strong, #7c3aed);
-  --accent: #f9a8d4;
-  --accent-strong: #f472b6;
-  --ok: var(--success, #22c55e);
-  --warn: #f59e0b;
-  --err: var(--danger, #ef4444);
-  --shadow: rgba(0,0,0,0.08);
-  --bg1:#fdf6ff;
-  --bg2:#f0fbff;
+  --bg1:#fdf0ff; --bg2:#f0fbff;
+  --ink:#1f2937; --muted:#6b7280;
+  --brand:#c084fc; --brand-strong:#a855f7;
+  --accent:#f9a8d4; --accent-strong:#f472b6;
+  --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  --card:#ffffff; --border:#e5e7eb; --shadow:rgba(0,0,0,0.08);
 }
-
-body{
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, "Noto Sans JP", sans-serif;
-  line-height: 1.6;
-  color: var(--ink);
-  /* ✅ 背景は index.html のグラデに任せる（黒背景化だけ後段で保険） */
-  background: transparent;
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;background:linear-gradient(180deg,var(--bg1),var(--bg2))}
+header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,0.75);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--border)}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.row{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 6px 20px var(--shadow);padding:16px}
+h1{font-size:20px;margin:4px 0}
+h2{font-size:18px;margin:8px 0 12px}
+h3{font-size:15px;margin:10px 0 6px}
+label{font-size:13px;color:var(--muted)}
+input[type=text], select, textarea{
+  width:100%;border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:14px;background:#fff
 }
-
-/* コンテナ（index.html側と同値。後勝ちなので衝突しません） */
-:where(.container){
-  max-width: 980px;
-  margin: 24px auto;
-  padding: 0 16px;
+textarea{min-height:120px;resize:vertical}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.flex-col{display:flex;gap:8px;flex-direction:column}
+.btn{
+  border:1px solid var(--border);background:#fff;border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;cursor:pointer
 }
-
-/* カード */
-:where(.card){
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
+.btn.brand{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.ghost{background:transparent}
+.btn.warn{background:var(--warn);border-color:var(--warn);color:#fff}
+.btn.err{background:var(--err);border-color:var(--err);color:#fff}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:#374151;background:#fff}
+.toolbar{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:700px){.grid-2{grid-template-columns:1fr}}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#fff
 }
+.small{font-size:12px;color:var(--muted)}
+.qcard{background:#fff;border:1px dashed var(--border);border-radius:12px;padding:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+.hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
+.toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
+.toast.show{opacity:1;transform:none}
+.danger{color:var(--err)}
+.success{color:var(--ok)}
+.muted{color:var(--muted)}
+.divider{height:1px;background:var(--border);margin:8px 0}
+.tab{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
+.tab.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.list{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto}
+.item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
+.caps{font-variant:all-small-caps;letter-spacing:.04em}
+.kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
 
-/* 行レイアウト補助（低特異性。index.htmlの.grid指定が優先されます） */
-:where(.row){
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
+/* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
+:focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
 
-/* テキスト */
-:where(.muted){ color: var(--muted); font-size: 13px; }
-:where(.badge){
-  display: inline-block;
-  padding: 2px 6px;
-  border: 1px solid var(--pastel-accent-strong);
-  border-radius: 6px;
-  font-size: 12px;
-  color: #4b5563;
-  background: #faf5ff;
-}
-
-/* 見出し（index側のh1指定と同値・干渉しない） */
-h1{ margin-bottom: 8px; }
-
-/* フォーム要素：白背景＆濃色文字を強制（可読性の担保） */
-label{ font-size: 14px; color: #374151; display: block; margin-bottom: 4px; }
-
-:where(select),
-:where(input[type="text"]),
-:where(textarea){
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  background: #fff;           /* 黒背景化対策 */
-  color: var(--ink);           /* 白文字固定の古い指定を上書き */
-  outline: none;
-  font-size: 14px;             /* ✅ PCは index に合わせる */
-}
-
-:where(textarea){ min-height: 120px; }
-
-/* プレースホルダーの可読性 */
-::placeholder{ color: #9aa3af; }
-
-/* Safari/Firefoxでのselect矢印・配色崩れ対策（見た目は現状キープ） */
-:where(select){
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  background-clip: padding-box;
-}
-
-/* フォーカス（控えめな枠線に） */
-:where(select:focus),
-:where(input[type="text"]:focus),
-:where(textarea:focus){
-  border-color: var(--brand-strong);
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
-}
-
-/* ボタン（index側の .btn, .btn.brand 等が後勝ち） */
-:where(.btn){
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: 1px solid var(--brand-strong);
-  background: var(--brand);
-  color: #fff;
-  cursor: pointer;
-}
-:where(.btn:hover){ background: var(--brand-strong); }
-:where(.btn).secondary{
-  background: #fff;
-  color: var(--brand-strong);
-  border: 1px solid var(--brand-strong);
-}
-
-/* 出力表示用pre */
-pre{
-  background: var(--pastel-bg);
-  color: var(--ink);
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--pastel-accent-strong);
-  overflow-x: auto;
-}
-
-/* ヒント（details/summary） */
-details.hints{
-  background: var(--pastel-accent);
-  border: 1px solid var(--pastel-accent-strong);
-  border-radius: 12px;
-  padding: 10px 14px;
-}
-details.hints > summary{
-  cursor: pointer;
-  font-weight: 600;
-  color: #4c1d95;
-  list-style: none;
-  padding: 6px 0; /* タップしやすく */
-}
-details.hints > summary::-webkit-details-marker{ display: none; }
-
-/* モーダル（indexのUIに合わせた補助。色味は既存変数使用） */
-:where(.modal){ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); }
-:where(.modal) .panel{ width:min(900px, 92vw); max-height:85vh; overflow:auto; background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.1); }
-:where(.stock-item){ border:1px solid var(--border); border-radius:10px; padding:10px; margin:8px 0; background:#fff; }
-:where(.stock-actions){ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-
-/* ---------- ここから下は「意図せぬ全体反転」を防ぐ保護 ---------- */
-
-/* 以前のテーマ残骸で、全体をダークにしてしまう指定の無効化 */
-html.dark body,
-body.dark,
-[data-theme="dark"] body{
-  background: transparent;
-  color: var(--ink);
-}
-
-/* aタグの色だけ極端に薄くなる指定の無効化 */
-a{ color: inherit; text-decoration: none; }
-a:hover{ text-decoration: underline; }
-
-/* グローバル * セレクタでの color/background 強制を想定して打ち消し */
-body, select, input, textarea, button, pre, .card{
-  background-image: none;
-}
-
-/* 余計な !important で白文字固定される事故を緩和（強度を抑えた再指定） */
-select, input, textarea, button{
-  color: var(--ink);
-}
-
-/* 印刷時（オプション：背景色を落として読みやすく） */
-@media print{
-  body{ background: #fff; }
-  .card{ box-shadow: none; }
-}
-
-/* モバイル細かな調整（レイアウトは変えない） */
-@media (max-width: 720px){
-  body{ line-height: 1.7; }
-  .row{ gap: 10px; }
-  /* ✅ iOSズーム防止はモバイルだけで効かせる */
-  select, input[type="text"], textarea{ font-size:16px; }
-}
-
-/* 既定で model バッジは非表示（HTML側でも非表示化済み。二重の保険） */
+/* model 表示は非表示に */
 #modelTag{ display:none; }
+
+/* =========================
+   使い方モーダル（小ウィンドウ）
+   ========================= */
+.modal{
+  position:fixed; inset:0; z-index:999;
+  display:none; align-items:center; justify-content:center;
+  padding:16px;
+  background:rgba(17,24,39,0.35);
+  backdrop-filter: blur(4px);
+}
+.modal.show{ display:flex; }
+.modal .panel{
+  width:min(920px, 96vw);
+  max-height:86vh;
+  overflow:auto;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  box-shadow:0 16px 60px rgba(0,0,0,0.18);
+  padding:16px;
+}
+.modal .panelHeader{
+  display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+  position:sticky; top:0; background:rgba(255,255,255,0.92);
+  backdrop-filter:saturate(180%) blur(8px);
+  border-bottom:1px solid var(--border);
+  padding:8px 8px 10px;
+  border-radius:14px;
+}
+.modal .panelTitle{ margin:0; font-size:18px; }
+.modal .panelBody{ padding:10px 6px 6px; }
+.callout{
+  background:linear-gradient(180deg,#fff7ff,#f5fbff);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:10px 12px;
+}
+.step{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:12px;
+  background:#fff;
+}
+.step h3{ margin:0 0 6px; font-size:15px; }
+.step ol, .step ul{ margin:8px 0 0; padding-left:18px; line-height:1.75; }
+.step .mini{ font-size:12px; color:var(--muted); margin-top:6px; }
