@@ -4,6 +4,9 @@
 # - CORS: ALLOWED_ORIGIN（カンマ区切り、末尾スラなし）
 # - 永続化: DATA_DIR（例: /var/data/eichan）。未設定時は /var/tmp/eichan
 # - ACCESS_CODE（任意）で変更系API・情報系の一部を保護
+# - EXPORT_ACCESS_CODE（任意）で「ダウンロード/エクスポート系」だけ別コードで保護（講師専用）
+# - 重要: 生徒にヒント（模範解答/解説/出題意図）を見せたくない場合、
+#         ストック取得APIは講師コードがないとヒント項目を返さない（自動マスク）
 # - 機能: 出題自動生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
 # - 改善: 入力バリデーション, JSON強制, レート制限, 500/404ハンドラ, ディスク使用状況, メトリクス
 # - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
@@ -22,7 +25,6 @@ import uuid
 import shutil
 import zipfile
 import random
-import sys  # ← 追加
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
@@ -31,13 +33,6 @@ from datetime import datetime, timezone, timedelta  # ← timedelta を追加
 
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
-
-# ---- 追加：標準出力をUTF-8に寄せる（macOS/ターミナル環境の事故回避） ----
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-except Exception:
-    pass
 
 # --- OpenAI (v1 SDK) ---
 try:
@@ -94,6 +89,12 @@ if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_none
             break
 
 ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
+
+# ✅ 追加：エクスポート（DL）専用コード（講師だけ）
+# これを設定すると、/api/export/* と /logs.zip はこのコードが必須になる
+# 未設定なら従来どおり ACCESS_CODE（あれば）で保護、両方未設定ならオープン
+EXPORT_ACCESS_CODE = (os.getenv("EXPORT_ACCESS_CODE") or "").strip() or None
+
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 RELEASE = os.getenv("RELEASE", "").strip()
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
@@ -129,15 +130,6 @@ METRICS = {
 
 # OpenAI疎通チェック（5分キャッシュ）
 _openai_ping_cache = {"ok": None, "detail": "", "ts": 0}
-
-# ---- 追加：採点観点（UI固定表示したい情報をAPIでも返せるようにする） ----
-RUBRIC = [
-    {"key": "要点", "desc": "問われている答えが入っている"},
-    {"key": "因果", "desc": "理由→結論がつながっている"},
-    {"key": "用語", "desc": "重要語句が入っている"},
-    {"key": "表現", "desc": "主語・比較・具体性が明確"},
-]
-RUBRIC_HINT = "迷ったら「原因→結果」「重要語句」「比較の軸」を意識すると点が伸びやすいです。"
 
 # =========================
 # ユーティリティ
@@ -257,6 +249,55 @@ def require_access_code(fn):
                 return jsonify({"error": "Forbidden"}), 403
         return fn(*args, **kwargs)
     return wrapper
+
+# ✅ 追加：エクスポート（DL）専用コード
+def require_export_code(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
+        if expected:
+            provided = (
+                request.headers.get("X-Export-Code")
+                # UI互換（設定欄が1つなので X-Access-Code でも通す）
+                or request.headers.get("X-Access-Code")
+                or request.args.get("export_code")
+                or request.args.get("exportCode")
+                # 互換：access_code / code でも通す（教師がURL直打ちする用）
+                or request.args.get("access_code")
+                or request.args.get("code")
+                or request.cookies.get("export_code")
+                or request.cookies.get("access_code")
+            )
+            if provided != expected:
+                return jsonify({"error": "Forbidden"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def _is_teacher_request() -> bool:
+    """
+    ストックAPI等で「ヒントを返して良いか」を判定。
+    EXPORT_ACCESS_CODE があればそれ、なければ ACCESS_CODE を教師コードとして扱う。
+    """
+    expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
+    if not expected:
+        return False
+    provided = (
+        request.headers.get("X-Export-Code")
+        or request.headers.get("X-Access-Code")
+        or request.args.get("export_code")
+        or request.args.get("exportCode")
+        or request.args.get("access_code")
+        or request.args.get("code")
+        or request.cookies.get("export_code")
+        or request.cookies.get("access_code")
+    )
+    return provided == expected
+
+def _strip_hints(item: Dict[str, Any]) -> Dict[str, Any]:
+    # 生徒には見せたくない要素を落とす
+    for k in ("model_answer", "explanation", "intention"):
+        item.pop(k, None)
+    return item
 
 def rate_limit(fn):
     @wraps(fn)
@@ -473,7 +514,6 @@ def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str,
         _openai_ping_cache.update({"ok": False, "detail": "SDK未初期化 or APIキー未設定", "ts": now})
         return False, _openai_ping_cache["detail"], now
     try:
-        # 重い list() ではなく、使うモデルのみ確認
         client.models.retrieve(MODEL_ID)
         ok = True
         _openai_ping_cache.update({"ok": ok, "detail": "ok", "ts": now})
@@ -494,7 +534,6 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     avoid = payload["avoid_topics"]
     length_hint = payload["length_hint"]
 
-    # 最近のタグを避け候補に（同テーマ連発抑制）
     recent = recent_tags()
     if recent:
         extra_avoid = "、".join(recent[:8])
@@ -533,7 +572,6 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     ma = payload.get("model_answer", "")
     difficulty = payload["difficulty"]
 
-    # ---- 変更：返却JSONに弱点タグ/次の一手/練習メニューを追加要求（既存キーは維持）----
     sysprompt = (
         "あなたは中学生の記述解答を採点する試験官です。"
         "採点は0〜10点の整数。"
@@ -541,14 +579,9 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "短い根拠を perfect_probability_note に書いてください。"
         "確率は『満点になる確率』なので、scoreが10でも100とは限りません（表現の曖昧さ・要点漏れの可能性を考慮）。"
         "出力は必ずJSONで、"
-        '{"score":int,"perfect_probability":int,"perfect_probability_note":str,'
-        '"commentary":str,"model_answer":str,"reasons":[str],'
-        '"weak_tags":[str],"next_steps":[str],"practice_menu":[str]}。'
+        '{"score":int,"perfect_probability":int,"perfect_probability_note":str,"commentary":str,"model_answer":str,"reasons":[str]}。'
         "commentary の冒頭に『10点中◯点』を必ず含める。"
         "reasons は3〜6個、箇条書きの短文。"
-        "weak_tags は3つ以内（例：因果不足／用語不足／具体例不足／比較不足／要点不足／表現不明瞭）。"
-        "next_steps は1〜3個、必ず“行動”で書く（例：『原因→結果の順で書く』『用語Aを必ず入れる』『比較の軸（XとY）を明示』）。"
-        "practice_menu は1〜3個、すぐできる練習にする（例：『因果テンプレで30字にまとめる練習を3回』）。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
@@ -602,6 +635,12 @@ def status():
     except Exception:
         disk = None
     ok, detail, ts = check_openai_connectivity(force=False)
+
+    def preview(v: Optional[str]) -> str:
+        if not v:
+            return "NOT SET"
+        return (v[:4] + "…" + v[-2:]) if len(v) > 8 else "SET"
+
     return jsonify({
         "ok": True,
         "DATA_DIR": str(DATA),
@@ -621,9 +660,10 @@ def status():
             "pro_daily_limit": PRO_DAILY_LIMIT,
             "default_plan": DEFAULT_PLAN,
         },
-        # 追加：採点観点も返せる（UI固定表示に使える）
-        "rubric": RUBRIC,
-        "rubric_hint": RUBRIC_HINT,
+        "codes": {
+            "ACCESS_CODE": preview(ACCESS_CODE),
+            "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
+        }
     }), 200
 
 @app.get("/env-check")
@@ -639,6 +679,7 @@ def env_check():
         "ALLOWED_ORIGIN": CORS_ORIGINS,
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
+        "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
         "MODEL_ID": MODEL_ID,
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
@@ -671,10 +712,6 @@ def auth():
 # ---- 日次クォータの確認用API（UIからはまだ未使用）----
 @app.get("/api/usage")
 def api_usage():
-    """
-    現在のユーザー（IPまたはX-User-Id）の本日分の利用状況を返す。
-    将来、UI上に「今日 3/5 回」などを出したくなったらここを叩けばOK。
-    """
     plan, limit = _plan_and_limit()
     usage = _load_usage_for_today()
     user_key = _get_user_key()
@@ -697,13 +734,13 @@ def api_usage():
 @app.get("/api/stock/list")
 def stock_list():
     items = current_stocks()
+    # ✅ 生徒にヒントを見せない（講師コードが無ければヒントを落とす）
+    if not _is_teacher_request():
+        items = [_strip_hints(dict(it)) for it in items]
     return jsonify({"ok": True, "items": items, "count": len(items), "limit": MAX_STOCK}), 200
 
 @app.get("/api/stock/search")
 def stock_search():
-    """簡易検索 + ページング。query params:
-       q, subject, category, grade, source, limit(=20), offset(=0)
-    """
     q = normalize_text(request.args.get("q", ""))
     subject = request.args.get("subject", "")
     category = request.args.get("category", "")
@@ -740,11 +777,14 @@ def stock_search():
     items = [it for it in current_stocks() if match(it)]
     total = len(items)
     sliced = items[offset: offset + limit]
+
+    if not _is_teacher_request():
+        sliced = [_strip_hints(dict(it)) for it in sliced]
+
     return jsonify({"ok": True, "total": total, "items": sliced, "limit": limit, "offset": offset}), 200
 
 @app.get("/api/stock/random")
 def stock_random():
-    """フィルタ条件に合うストックから1件ランダムに取得。exclude_ids=カンマ区切りで除外可。"""
     q = request.args.get("q", "")
     subject = request.args.get("subject", "")
     category = request.args.get("category", "")
@@ -775,6 +815,10 @@ def stock_random():
     if not candidates:
         return jsonify({"ok": False, "error": "no_candidates"}), 404
     item = random.choice(candidates)
+
+    if not _is_teacher_request():
+        item = _strip_hints(dict(item))
+
     return jsonify({"ok": True, "item": item}), 200
 
 @app.post("/api/stock/add")
@@ -792,7 +836,6 @@ def stock_add():
     if dup:
         return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup}), 200
 
-    # 教科→カテゴリ整合チェック（任意のPOSTでも強制）
     subject = data.get("subject", "")[:20]
     if subject not in ALLOWED_SUBJECTS:
         subject = ""
@@ -857,9 +900,8 @@ def stock_import():
     if not request.is_json:
         return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 415
     body = request.get_json(force=True, silent=True) or {}
-    # 入力形式: {items: [...], dry_run: bool, skip_duplicates: bool, overwrite_if_similar: bool, truncate_before: bool}
     items = body.get("items")
-    if items is None and isinstance(body, list):  # ルート配列も許容
+    if items is None and isinstance(body, list):
         items = body
     if not isinstance(items, list):
         return jsonify({"ok": False, "error": "items(list) が必要です"}), 400
@@ -918,7 +960,7 @@ def stock_import():
         }
 
         if dry:
-            added += 1  # 仮に追加扱い
+            added += 1
             saved_ids.append(item["id"])
             continue
 
@@ -950,7 +992,7 @@ def stock_import():
 @app.post("/api/generate_question")
 @require_access_code
 @rate_limit
-@enforce_quota("generate")  # ← 日次クォータ適用
+@enforce_quota("generate")
 def generate_question():
     t0 = time.time()
     err = ensure_openai()
@@ -993,7 +1035,6 @@ def generate_question():
         _update_metrics("generate", False, t0)
         return jsonify({"ok": False, "error": "generation failed"}), 502
 
-    # 重複回避
     dup = find_duplicate_in_stocks(question)
     if dup:
         append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated-duplicate", "question": question, "ts": now_ms()})
@@ -1011,9 +1052,9 @@ def generate_question():
         "id": uuid.uuid4().hex,
         "source": "auto",
         "question": question,
-        "model_answer": model_answer,   # ヒント（UIで隠す前提）
-        "explanation": explanation,     # ヒント
-        "intention": intention,         # ヒント
+        "model_answer": model_answer,
+        "explanation": explanation,
+        "intention": intention,
         "tags": tags,
         "subject": payload["subject"],
         "category": payload["category"],
@@ -1035,78 +1076,10 @@ def generate_question():
 # =========================
 # 採点 API
 # =========================
-def _sanitize_str_list(x: Any, max_items: int, max_len: int) -> List[str]:
-    if not isinstance(x, list):
-        x = [x] if x is not None else []
-    out: List[str] = []
-    for a in x:
-        s = normalize_text(str(a))[:max_len]
-        if s and s not in out:
-            out.append(s)
-        if len(out) >= max_items:
-            break
-    return out
-
-def _infer_weak_tags_from_reasons(reasons: List[str]) -> List[str]:
-    joined = " ".join(reasons)
-    tags: List[str] = []
-
-    def add(t: str):
-        if t not in tags:
-            tags.append(t)
-
-    if any(k in joined for k in ["因果", "理由", "つなが", "だから"]):
-        add("因果不足")
-    if any(k in joined for k in ["用語", "語句", "キーワード", "重要語"]):
-        add("用語不足")
-    if any(k in joined for k in ["具体", "例", "説明が足り", "曖昧"]):
-        add("具体例不足")
-    if any(k in joined for k in ["比較", "比べ", "差", "どちら"]):
-        add("比較不足")
-    if any(k in joined for k in ["要点", "聞かれ", "主題", "結論"]):
-        add("要点不足")
-    if any(k in joined for k in ["表現", "日本語", "主語", "わかりにく"]):
-        add("表現不明瞭")
-
-    return tags[:3]
-
-def _fallback_next_steps(weak_tags: List[str]) -> List[str]:
-    steps: List[str] = []
-    if "因果不足" in weak_tags:
-        steps.append("原因→結果の順で1文にまとめる")
-    if "用語不足" in weak_tags:
-        steps.append("重要語句を1つ以上必ず入れる")
-    if "比較不足" in weak_tags:
-        steps.append("比較の軸（XとY）を明示して書く")
-    if "具体例不足" in weak_tags:
-        steps.append("具体例を1つ入れて説明する")
-    if "要点不足" in weak_tags:
-        steps.append("問われている結論を最初の1文に置く")
-    if "表現不明瞭" in weak_tags:
-        steps.append("主語を入れ、短い文に区切って書く")
-
-    if not steps:
-        steps = ["要点→理由の順で書く", "重要語句を入れる", "最後に結論を言い切る"]
-    return steps[:3]
-
-def _fallback_practice_menu(weak_tags: List[str]) -> List[str]:
-    menu: List[str] = []
-    if "因果不足" in weak_tags:
-        menu.append("因果テンプレ（原因→結果）で30〜50字にまとめる練習を3回")
-    if "用語不足" in weak_tags:
-        menu.append("重要語句リストから2語選び、必ず入れて書く練習を2回")
-    if "比較不足" in weak_tags:
-        menu.append("XとYを比べる一文（共通点/相違点）を書く練習を2回")
-    if "具体例不足" in weak_tags:
-        menu.append("具体例を1つ入れた説明文を作る練習を2回")
-    if not menu:
-        menu = ["30〜80字で『結論→理由』の型で書く練習を3回"]
-    return menu[:3]
-
 @app.post("/api/grade_answer")
 @require_access_code
 @rate_limit
-@enforce_quota("grade")  # ← 日次クォータ適用
+@enforce_quota("grade")
 def grade_answer():
     t0 = time.time()
     err = ensure_openai()
@@ -1148,11 +1121,11 @@ def grade_answer():
     if not commentary.startswith(head):
         commentary = f"{head}：{commentary}" if commentary else f"{head}。"
     reasons = result.get("reasons", [])
-    reasons = _sanitize_str_list(reasons, max_items=8, max_len=200)
-
+    if not isinstance(reasons, list):
+        reasons = [str(reasons)]
+    reasons = [normalize_text(str(x))[:200] for x in reasons][:8]
     model_ans = (result.get("model_answer", "") or data.get("model_answer", "")).strip()
 
-    # ✅ 満点（○）になる確率（0〜100）
     prob_raw = result.get("perfect_probability", None)
     prob_note = (result.get("perfect_probability_note", "") or "").strip()
 
@@ -1164,25 +1137,12 @@ def grade_answer():
         except Exception:
             prob = None
 
-    # モデルが返さなかった場合の保険（最低限の表示が出るように）
     if prob is None:
-        prob = int(round(score * 10))  # 0〜100の簡易推定
+        prob = int(round(score * 10))
         if not prob_note:
             prob_note = "スコアからの簡易推定"
 
     prob = max(0, min(100, int(prob)))
-
-    # ---- 追加：弱点タグ / 次の一手 / 練習メニュー（返ってこなければサーバで補完） ----
-    weak_tags = _sanitize_str_list(result.get("weak_tags", []), max_items=3, max_len=40)
-    next_steps = _sanitize_str_list(result.get("next_steps", []), max_items=3, max_len=60)
-    practice_menu = _sanitize_str_list(result.get("practice_menu", []), max_items=3, max_len=80)
-
-    if not weak_tags:
-        weak_tags = _infer_weak_tags_from_reasons(reasons)
-    if not next_steps:
-        next_steps = _fallback_next_steps(weak_tags)
-    if not practice_menu:
-        practice_menu = _fallback_practice_menu(weak_tags)
 
     append_jsonl(LOG_DIR / "grading.jsonl", {
         "event": "graded",
@@ -1190,9 +1150,6 @@ def grade_answer():
         "student_answer": data["student_answer"],
         "score": score,
         "perfect_probability": prob,
-        "weak_tags": weak_tags,
-        "next_steps": next_steps,
-        "practice_menu": practice_menu,
         "ts": now_ms()
     })
 
@@ -1205,20 +1162,14 @@ def grade_answer():
         "reasons": reasons,
         "perfect_probability": prob,
         "perfect_probability_note": prob_note,
-        "max_score": 10,
-        # 追加返却（UI側で順次表示できる）
-        "weak_tags": weak_tags,
-        "next_steps": next_steps,
-        "practice_menu": practice_menu,
-        "rubric": RUBRIC,
-        "rubric_hint": RUBRIC_HINT,
+        "max_score": 10
     }), 200
 
 # =========================
-# エクスポート
+# エクスポート（✅講師専用コードで保護）
 # =========================
 @app.get("/api/export/stocks.json")
-@require_access_code
+@require_export_code
 def export_stocks_json():
     items = current_stocks()
     tmp = DATA / "stocks_export.json"
@@ -1226,7 +1177,7 @@ def export_stocks_json():
     return send_file(tmp, as_attachment=True, download_name="stocks.json", mimetype="application/json")
 
 @app.get("/api/export/stocks.csv")
-@require_access_code
+@require_export_code
 def export_stocks_csv():
     items = current_stocks()
     tmp = DATA / "stocks_export.csv"
@@ -1235,7 +1186,7 @@ def export_stocks_csv():
         "question", "model_answer", "explanation", "intention",
         "tags", "source", "created_at_iso"
     ]
-    with tmp.open("w", newline="", encoding="utf-8-sig") as f:  # BOM付き(Excel対策)
+    with tmp.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for it in items:
@@ -1256,21 +1207,16 @@ def export_stocks_csv():
     return send_file(tmp, as_attachment=True, download_name="stocks.csv", mimetype="text/csv")
 
 @app.get("/api/export/grading.jsonl")
-@require_access_code
+@require_export_code
 def export_grading_jsonl():
     path = LOG_DIR / "grading.jsonl"
     if not path.exists():
         path.write_text("", encoding="utf-8")
     return send_file(path, as_attachment=True, download_name="grading.jsonl", mimetype="application/jsonl")
 
-# ---- ログZIP ----
 @app.get("/logs.zip")
-@require_access_code
+@require_export_code
 def download_logs_zip():
-    """
-    logs/errors.jsonl, logs/generation.jsonl, logs/grading.jsonl, logs/stocks.jsonl をZIP化。
-    クエリ ?include=stocks を付けると stocks/*.json も同梱。
-    """
     include = (request.args.get("include") or "").lower()
     with io.BytesIO() as mem:
         with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -1292,20 +1238,18 @@ def api_model():
 @app.post("/api/model")
 @require_access_code
 def set_model():
-    """モデルを動的切替（UIから安全に変更可能に）"""
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 415
     body = request.get_json(force=True, silent=True) or {}
     new_model = normalize_text(body.get("model", ""))
     if not new_model:
         return jsonify({"ok": False, "error": "model is required"}), 400
-    # ここではホワイトリスト制限はせず、任意文字列を許容（運用で制御）
     global MODEL_ID
     MODEL_ID = new_model
     return jsonify({"ok": True, "model": MODEL_ID}), 200
 
 # ---- エントリポイント ----
 if __name__ == "__main__":
-    # ★変更：デフォルトを 5001 に（PORT未指定のとき）
+    # ✅ ローカルは 5001 をデフォルト（Renderは PORT が入るので影響なし）
     port = int(os.getenv("PORT", "5001"))
     app.run(host="0.0.0.0", port=port, debug=env_bool("DEBUG"))
