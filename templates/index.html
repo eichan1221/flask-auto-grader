@@ -21,8 +21,8 @@
         <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
         <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
 
-        <!-- ✅ 追加：フィードバック（フォームを小ウィンドウ表示） -->
-        <button class="btn" id="btnFeedback" title="フィードバックフォームを開く">フィードバック</button>
+        <!-- ✅ 追加：フィードバック（別タブで開く） -->
+        <a class="btn" id="btnFeedback" href="https://forms.gle/fRdhbmeEHwtM5soF8" target="_blank" rel="noopener">フィードバック</a>
 
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
@@ -44,19 +44,12 @@
         <div>
           <label for="accessCode">ACCESS_CODE（保護API用 / 任意）</label>
           <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与" aria-describedby="accessCodeHelp" />
-          <div id="accessCodeHelp" class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
+          <div id="accessCodeHelp" class="small muted">設定すると生成・採点・削除などの保護APIに認証ヘッダーが付与されます。</div>
         </div>
-      </div>
-
-      <!-- ✅ 追加：フィードバックフォームURL（任意） -->
-      <div style="margin-top:12px">
-        <label for="feedbackUrl">フィードバックフォームURL（任意）</label>
-        <input type="text" id="feedbackUrl"
-               placeholder="例 https://docs.google.com/forms/d/e/xxxx/viewform"
-               aria-describedby="feedbackUrlHelp" />
-        <div id="feedbackUrlHelp" class="small muted">
-          ここに入れると右上「フィードバック」からフォームを画面内に表示できます。<br>
-          ※ forms.gle の短縮URLでも動くことがありますが、埋め込みが不安定な場合は「/viewform」形式のURL推奨です。
+        <div>
+          <label for="exportCode">EXPORT_CODE（ダウンロード専用 / 任意）</label>
+          <input type="text" id="exportCode" placeholder="ヘッダーに X-Export-Code として付与" aria-describedby="exportCodeHelp" />
+          <div id="exportCodeHelp" class="small muted">設定するとエクスポート系のダウンロードに認証ヘッダーが付与されます。</div>
         </div>
       </div>
 
@@ -329,48 +322,9 @@
     </div>
   </div>
 
-  <!-- =========================
-       ✅ フィードバックフォーム モーダル（埋め込み）
-       ========================= -->
-  <div class="modal" id="feedbackModal" aria-hidden="true">
-    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
-      <div class="panelHeader">
-        <div>
-          <h2 class="panelTitle" id="feedbackTitle">フィードバック（30秒）</h2>
-          <div class="small muted">※個人名・学校名などの個人情報は入力しないでください。</div>
-        </div>
-        <div class="flex" style="gap:8px">
-          <a class="btn" id="btnFeedbackOpenExternal" href="#" target="_blank" rel="noopener">別タブで開く</a>
-          <button class="btn" id="btnFeedbackClose" aria-label="フィードバックを閉じる">閉じる</button>
-        </div>
-      </div>
-
-      <div class="panelBody">
-        <div class="small muted" id="feedbackStatus" style="margin-bottom:8px"></div>
-        <iframe
-          id="feedbackFrame"
-          title="フィードバックフォーム"
-          style="width:100%;height:72vh;border:1px solid rgba(0,0,0,0.08);border-radius:12px;background:#fff;"
-          referrerpolicy="no-referrer-when-downgrade"
-          loading="lazy"
-          src="">
-        </iframe>
-
-        <div class="small muted" style="margin-top:10px">
-          もしフォームが表示されない場合：上の「別タブで開く」から回答してください。
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
-    // =========================
-    // ✅ フィードバックフォームのデフォルトURL（ここに貼ってOK）
-    // =========================
-    const DEFAULT_FEEDBACK_URL = ""; // 例: "https://docs.google.com/forms/d/e/xxxx/viewform"
-
     // ---- 設定の永続化 ----
     const $ = (q)=>document.querySelector(q);
     const cfg = {
@@ -378,97 +332,11 @@
       set baseUrl(v){ localStorage.setItem('baseUrl', v||''); },
       get accessCode(){ return localStorage.getItem('accessCode') || ''; },
       set accessCode(v){ localStorage.setItem('accessCode', v||''); },
-
-      // ✅ 追加：フィードバックURL
-      get feedbackUrl(){ return localStorage.getItem('feedbackUrl') || ''; },
-      set feedbackUrl(v){ localStorage.setItem('feedbackUrl', v||''); },
+      get exportCode(){ return localStorage.getItem('exportCode') || ''; },
+      set exportCode(v){ localStorage.setItem('exportCode', v||''); },
 
       endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
     };
-
-    // ✅ フィードバックURLの解決（設定が優先）
-    function resolveFeedbackUrl(){
-      const u = (cfg.feedbackUrl || '').trim();
-      if(u) return u;
-      return (DEFAULT_FEEDBACK_URL || '').trim();
-    }
-
-    // ✅ Googleフォーム埋め込み用URLに整形
-    function toEmbedUrl(url){
-      const u = (url || '').trim();
-      if(!u) return "";
-
-      // すでに embedded=true があればそのまま
-      if(u.includes('embedded=true')) return u;
-
-      // viewform 形式なら embedded=true を付ける
-      if(u.includes('/viewform')){
-        return u.includes('?')
-          ? (u + '&embedded=true')
-          : (u + '?embedded=true');
-      }
-
-      // forms.gle の短縮はそのまま（埋め込みが不安定な場合あり）
-      return u;
-    }
-
-    function applyFeedbackUI(){
-      const btn = $('#btnFeedback');
-      const url = resolveFeedbackUrl();
-      if(!btn) return;
-
-      // URLが空なら案内
-      if(!url){
-        btn.dataset.ready = "0";
-        return;
-      }
-      btn.dataset.ready = "1";
-
-      // external link 更新
-      const ext = $('#btnFeedbackOpenExternal');
-      if(ext){
-        ext.href = url;
-      }
-    }
-
-    function openFeedback(){
-      const url = resolveFeedbackUrl();
-      if(!url){
-        alert('フィードバックフォームURLが未設定です。\n右上「設定」→「フィードバックフォームURL」に貼り付けて保存してください。');
-        return;
-      }
-      const modal = $('#feedbackModal');
-      const frame = $('#feedbackFrame');
-      const st = $('#feedbackStatus');
-      const ext = $('#btnFeedbackOpenExternal');
-
-      if(ext) ext.href = url;
-
-      // 埋め込みURL
-      const embed = toEmbedUrl(url);
-      if(frame) frame.src = embed || url;
-
-      if(st){
-        st.textContent = (embed && embed !== url)
-          ? 'フォームを埋め込み表示しています。'
-          : 'フォームを表示しています（表示されない場合は「別タブで開く」を利用してください）。';
-      }
-
-      modal.classList.add('show');
-      modal.setAttribute('aria-hidden','false');
-      setTimeout(()=>{ $('#btnFeedbackClose')?.focus(); }, 0);
-    }
-
-    function closeFeedback(){
-      const modal = $('#feedbackModal');
-      const frame = $('#feedbackFrame');
-      modal.classList.remove('show');
-      modal.setAttribute('aria-hidden','true');
-
-      // iframeを停止（戻った時に再読み込みしたい場合）
-      if(frame) frame.src = "";
-      setTimeout(()=>{ $('#btnFeedback')?.focus(); }, 0);
-    }
 
     // ---- 追加：観点（固定表示のデフォルト） ----
     const DEFAULT_RUBRIC = [
@@ -611,15 +479,14 @@
     function loadSettings(){
       $('#baseUrl').value = cfg.baseUrl;
       $('#accessCode').value = cfg.accessCode;
-      $('#feedbackUrl').value = cfg.feedbackUrl; // ✅ 追加
+      $('#exportCode').value = cfg.exportCode;
     }
     function saveSettings(){
       cfg.baseUrl = $('#baseUrl').value.trim();
       cfg.accessCode = $('#accessCode').value.trim();
-      cfg.feedbackUrl = $('#feedbackUrl').value.trim(); // ✅ 追加
+      cfg.exportCode = $('#exportCode').value.trim();
       $('#statusLine').textContent = '保存しました';
       setTimeout(()=>$('#statusLine').textContent='', 1500);
-      applyFeedbackUI();
     }
 
     // ---- 学年とカテゴリの整合（理科：天体は中3のみ）----
@@ -675,9 +542,6 @@
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
-
-      // ✅ フィードバックUI反映
-      applyFeedbackUI();
 
       renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
 
@@ -1012,9 +876,21 @@
     // ---- エクスポート（ヘッダー付きDL）----
     async function downloadEndpoint(path, filename){
       const headers = {};
-      if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
+      if(cfg.exportCode) headers['X-Export-Code'] = cfg.exportCode;
       const res = await fetch(cfg.endpoint(path), {headers});
-      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if(!res.ok){
+        if(res.status === 403){
+          let msg = 'EXPORT_CODEを設定してください';
+          try{
+            const j = await res.json();
+            if(j && j.message) msg = j.message;
+          }catch(e){}
+          const err = new Error(msg);
+          err.code = 'export_forbidden';
+          throw err;
+        }
+        throw new Error(`${res.status} ${res.statusText}`);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1100,9 +976,16 @@
       toast('同じ問題で再挑戦できます');
     };
 
-    $('#btnExportJson').onclick = ()=> downloadEndpoint('/api/export/stocks.json', 'stocks.json').catch(e=>toast('DL失敗: '+e.message,false));
-    $('#btnExportCsv').onclick = ()=> downloadEndpoint('/api/export/stocks.csv', 'stocks.csv').catch(e=>toast('DL失敗: '+e.message,false));
-    $('#btnExportGrading').onclick = ()=> downloadEndpoint('/api/export/grading.jsonl', 'grading.jsonl').catch(e=>toast('DL失敗: '+e.message,false));
+    const handleExportError = (e)=>{
+      if(e && e.code === 'export_forbidden'){
+        toast('EXPORT_CODEを設定してください', false);
+        return;
+      }
+      toast('DL失敗: '+e.message, false);
+    };
+    $('#btnExportJson').onclick = ()=> downloadEndpoint('/api/export/stocks.json', 'stocks.json').catch(handleExportError);
+    $('#btnExportCsv').onclick = ()=> downloadEndpoint('/api/export/stocks.csv', 'stocks.csv').catch(handleExportError);
+    $('#btnExportGrading').onclick = ()=> downloadEndpoint('/api/export/grading.jsonl', 'grading.jsonl').catch(handleExportError);
 
     $('#btnSettings').onclick = ()=> $('#settingsCard').style.display='';
     $('#btnHideSettings').onclick = ()=> $('#settingsCard').style.display='none';
@@ -1122,19 +1005,10 @@
       if(e.target === e.currentTarget) closeHowto();
     });
 
-    // ✅ フィードバックモーダル開閉
-    $('#btnFeedback').onclick = openFeedback;
-    $('#btnFeedbackClose').onclick = closeFeedback;
-    $('#feedbackModal').addEventListener('click', (e)=>{
-      if(e.target === e.currentTarget) closeFeedback();
-    });
-
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
-      const fb = $('#feedbackModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
-        if(fb && fb.classList.contains('show')) closeFeedback();
       }
     });
 
