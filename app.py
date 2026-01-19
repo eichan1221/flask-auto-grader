@@ -4,7 +4,7 @@
 # - CORS: ALLOWED_ORIGIN（カンマ区切り、末尾スラなし）
 # - 永続化: DATA_DIR（例: /var/data/eichan）。未設定時は /var/tmp/eichan
 # - ACCESS_CODE（任意）で変更系API・情報系の一部を保護
-# - EXPORT_ACCESS_CODE（任意）で「ダウンロード/エクスポート系」だけ別コードで保護（講師専用）
+# - EXPORT_CODE（任意）で「ダウンロード/エクスポート系」だけ別コードで保護（講師専用）
 # - 重要: 生徒にヒント（模範解答/解説/出題意図）を見せたくない場合、
 #         ストック取得APIは講師コードがないとヒント項目を返さない（自動マスク）
 # - 機能: 出題自動生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
@@ -92,8 +92,8 @@ ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 
 # ✅ 追加：エクスポート（DL）専用コード（講師だけ）
 # これを設定すると、/api/export/* と /logs.zip はこのコードが必須になる
-# 未設定なら従来どおり ACCESS_CODE（あれば）で保護、両方未設定ならオープン
-EXPORT_ACCESS_CODE = (os.getenv("EXPORT_ACCESS_CODE") or "").strip() or None
+# 未設定なら従来どおりオープン
+EXPORT_CODE = (os.getenv("EXPORT_CODE") or "").strip() or None
 
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 RELEASE = os.getenv("RELEASE", "").strip()
@@ -254,44 +254,32 @@ def require_access_code(fn):
 def require_export_code(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
-        if expected:
+        if EXPORT_CODE:
             provided = (
                 request.headers.get("X-Export-Code")
-                # UI互換（設定欄が1つなので X-Access-Code でも通す）
-                or request.headers.get("X-Access-Code")
                 or request.args.get("export_code")
                 or request.args.get("exportCode")
-                # 互換：access_code / code でも通す（教師がURL直打ちする用）
-                or request.args.get("access_code")
-                or request.args.get("code")
                 or request.cookies.get("export_code")
-                or request.cookies.get("access_code")
             )
-            if provided != expected:
-                return jsonify({"error": "Forbidden"}), 403
+            if provided != EXPORT_CODE:
+                return jsonify({"error": "forbidden", "message": "EXPORT_CODE required"}), 403
         return fn(*args, **kwargs)
     return wrapper
 
 def _is_teacher_request() -> bool:
     """
     ストックAPI等で「ヒントを返して良いか」を判定。
-    EXPORT_ACCESS_CODE があればそれ、なければ ACCESS_CODE を教師コードとして扱う。
+    ACCESS_CODE を教師コードとして扱う。
     """
-    expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
-    if not expected:
+    if not ACCESS_CODE:
         return False
     provided = (
-        request.headers.get("X-Export-Code")
-        or request.headers.get("X-Access-Code")
-        or request.args.get("export_code")
-        or request.args.get("exportCode")
+        request.headers.get("X-Access-Code")
         or request.args.get("access_code")
         or request.args.get("code")
-        or request.cookies.get("export_code")
         or request.cookies.get("access_code")
     )
-    return provided == expected
+    return provided == ACCESS_CODE
 
 def _strip_hints(item: Dict[str, Any]) -> Dict[str, Any]:
     # 生徒には見せたくない要素を落とす
@@ -662,7 +650,7 @@ def status():
         },
         "codes": {
             "ACCESS_CODE": preview(ACCESS_CODE),
-            "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
+            "EXPORT_CODE": preview(EXPORT_CODE),
         }
     }), 200
 
@@ -679,7 +667,7 @@ def env_check():
         "ALLOWED_ORIGIN": CORS_ORIGINS,
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
-        "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
+        "EXPORT_CODE": preview(EXPORT_CODE),
         "MODEL_ID": MODEL_ID,
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
