@@ -307,7 +307,6 @@
       </div>
 
       <div class="panelBody">
-        <!-- （中身は元のまま） -->
         <div class="callout">
           <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
           <ul style="margin:0;padding-left:18px;line-height:1.8">
@@ -318,12 +317,83 @@
           </ul>
         </div>
 
-        <!-- 以降、あなたの元の説明文が続く（省略なしでそのまま） -->
-        <!-- ...（ここから下はあなたの提示コードのまま）... -->
         <div class="divider" style="margin:14px 0"></div>
 
-        <!-- ※あなたの説明文をこのまま残してOK -->
-        <!-- （このサンプルでは、以降の内容は質問文に貼って頂いたものが続く想定です） -->
+        <div>
+          <div class="caps">まず最初に（初回だけ）</div>
+          <ol style="margin-top:8px;line-height:1.8">
+            <li>右上の<strong>設定</strong>を開き、必要なら「API Base URL」と「ACCESS_CODE」を入力します。</li>
+            <li>保存後、右上の<strong>再読込</strong>で反映します（同一オリジンなら空欄のままでOK）。</li>
+            <li>使い方が分からなくなったら、この<strong>使い方説明</strong>を開けばOKです。</li>
+          </ol>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div>
+          <div class="caps">① 出題の生成（左側）</div>
+          <ol style="margin-top:8px;line-height:1.8">
+            <li><strong>社会/理科</strong>タブを選びます（理科は学年を指定可能）。</li>
+            <li>分類・難易度・解答分量の目安を入力します。</li>
+            <li>必要なら「出題の方向性」「避ける話題」を入力します。</li>
+            <li><strong>問題を自動生成</strong>を押すと、生成結果が表示されます。</li>
+          </ol>
+          <div class="small muted" style="margin-top:6px">
+            ヒントを見たい場合は「ヒントを表示」をONにすると、模範解答・解説・出題意図を確認できます。
+          </div>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div>
+          <div class="caps">② ストックの使い方（左側下部）</div>
+          <ol style="margin-top:8px;line-height:1.8">
+            <li>生成した問題は自動的にストックに追加されます（最新10件）。</li>
+            <li>検索ボックスでキーワード検索、<strong>ランダム</strong>で条件に合う問題を1問選べます。</li>
+            <li>使いたい問題をクリックすると、採点側にセットされます。</li>
+          </ol>
+          <div class="small muted" style="margin-top:6px">
+            ストックは「📦 stocks.json」「📊 stocks.csv」で書き出しできます。
+          </div>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div>
+          <div class="caps">③ 採点の流れ（右側）</div>
+          <ol style="margin-top:8px;line-height:1.8">
+            <li>左側で作成した問題を「この問題で採点へ」で右側に送ります。</li>
+            <li>生徒の解答を入力し、<strong>採点する</strong>を押します。</li>
+            <li>点数、講評、理由、模範解答が表示されます。</li>
+            <li>採点の観点は右上に固定表示されるので、<strong>何を見ているか</strong>が確認できます。</li>
+            <li>やり直したいときは「同じ問題でもう一回」で即リトライできます。</li>
+          </ol>
+          <div class="small muted" style="margin-top:6px">
+            採点結果は「🧾 grading.jsonl」で書き出しできます。
+          </div>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div>
+          <div class="caps">よくある使い方（例）</div>
+          <ul style="margin-top:8px;padding-left:18px;line-height:1.8">
+            <li>小テスト用に<strong>難易度=5点</strong>で10問生成 → ストックから当日使う。</li>
+            <li>定期テスト対策で<strong>満点</strong>にして記述量を増やす。</li>
+            <li>「避ける話題」に既習単元を入れて、被りを防ぐ。</li>
+          </ul>
+        </div>
+
+        <div class="divider" style="margin:14px 0"></div>
+
+        <div>
+          <div class="caps">困ったときは</div>
+          <ul style="margin-top:8px;padding-left:18px;line-height:1.8">
+            <li>表示が変わらないときは<strong>再読込</strong>を押してください。</li>
+            <li>APIに接続できない場合は、<strong>設定</strong>のURLとACCESS_CODEを確認します。</li>
+            <li>フィードバックフォームが画面内に表示されない場合は「別タブで開く」を使ってください。</li>
+          </ul>
+        </div>
 
       </div>
     </div>
