@@ -4,7 +4,7 @@
 # - CORS: ALLOWED_ORIGIN（カンマ区切り、末尾スラなし）
 # - 永続化: DATA_DIR（例: /var/data/eichan）。未設定時は /var/tmp/eichan
 # - ACCESS_CODE（任意）で変更系API・情報系の一部を保護
-# - EXPORT_ACCESS_CODE（任意）で「ダウンロード/エクスポート系」だけ別コードで保護（講師専用）
+# - EXPORT_CODE（任意）で「ダウンロード/エクスポート系」だけ別コードで保護（講師専用）
 # - 重要: 生徒にヒント（模範解答/解説/出題意図）を見せたくない場合、
 #         ストック取得APIは講師コードがないとヒント項目を返さない（自動マスク）
 # - 機能: 出題自動生成 / 採点 / ストック（上限10・重複対策） / ログ / エクスポート(JSON/CSV) / 健康診断
@@ -25,13 +25,14 @@ import uuid
 import shutil
 import zipfile
 import random
+import hmac
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta  # ← timedelta を追加
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, session
 from flask_cors import CORS
 
 # --- OpenAI (v1 SDK) ---
@@ -53,6 +54,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 1_000_000))  # 1MB
+app.secret_key = os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or os.urandom(24)
 
 # CORS
 ALLOWED_ORIGIN_RAW = os.getenv("ALLOWED_ORIGIN", "")
@@ -90,10 +92,10 @@ if not _dir_nonempty(STOCK_DIR) and not _dir_nonempty(LOG_DIR) and not _dir_none
 
 ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 
-# ✅ 追加：エクスポート（DL）専用コード（講師だけ）
+# ✅ エクスポート（DL）専用コード（講師だけ）
 # これを設定すると、/api/export/* と /logs.zip はこのコードが必須になる
-# 未設定なら従来どおり ACCESS_CODE（あれば）で保護、両方未設定ならオープン
-EXPORT_ACCESS_CODE = (os.getenv("EXPORT_ACCESS_CODE") or "").strip() or None
+# 未設定の場合は常に403（うっかり公開を防ぐ）
+EXPORT_CODE = (os.getenv("EXPORT_CODE") or "").strip() or None
 
 MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
 RELEASE = os.getenv("RELEASE", "").strip()
@@ -254,44 +256,32 @@ def require_access_code(fn):
 def require_export_code(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
-        if expected:
-            provided = (
-                request.headers.get("X-Export-Code")
-                # UI互換（設定欄が1つなので X-Access-Code でも通す）
-                or request.headers.get("X-Access-Code")
-                or request.args.get("export_code")
-                or request.args.get("exportCode")
-                # 互換：access_code / code でも通す（教師がURL直打ちする用）
-                or request.args.get("access_code")
-                or request.args.get("code")
-                or request.cookies.get("export_code")
-                or request.cookies.get("access_code")
-            )
-            if provided != expected:
-                return jsonify({"error": "Forbidden"}), 403
+        if not EXPORT_CODE:
+            return jsonify({"error": "Forbidden"}), 403
+        provided = request.headers.get("X-Export-Code") or request.args.get("code")
+        if not provided or not hmac.compare_digest(str(provided), str(EXPORT_CODE)):
+            return jsonify({"error": "Forbidden"}), 403
         return fn(*args, **kwargs)
     return wrapper
 
 def _is_teacher_request() -> bool:
     """
     ストックAPI等で「ヒントを返して良いか」を判定。
-    EXPORT_ACCESS_CODE があればそれ、なければ ACCESS_CODE を教師コードとして扱う。
+    EXPORT_CODE があればそれ、なければ ACCESS_CODE を教師コードとして扱う。
     """
-    expected = EXPORT_ACCESS_CODE if EXPORT_ACCESS_CODE else ACCESS_CODE
+    expected = EXPORT_CODE or ACCESS_CODE
     if not expected:
         return False
     provided = (
         request.headers.get("X-Export-Code")
         or request.headers.get("X-Access-Code")
-        or request.args.get("export_code")
-        or request.args.get("exportCode")
         or request.args.get("access_code")
         or request.args.get("code")
-        or request.cookies.get("export_code")
         or request.cookies.get("access_code")
     )
-    return provided == expected
+    if not provided:
+        return False
+    return hmac.compare_digest(str(provided), str(expected))
 
 def _strip_hints(item: Dict[str, Any]) -> Dict[str, Any]:
     # 生徒には見せたくない要素を落とす
@@ -577,10 +567,17 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "採点は0〜10点の整数。"
         "さらに『入試本番で満点（○）になる確率』を0〜100の整数で推定し、"
         "短い根拠を perfect_probability_note に書いてください。"
-        "確率は『満点になる確率』なので、scoreが10でも100とは限りません（表現の曖昧さ・要点漏れの可能性を考慮）。"
+        "確率は『満点になる確率』なので、score_totalが10でも100とは限りません（表現の曖昧さ・要点漏れの可能性を考慮）。"
         "出力は必ずJSONで、"
-        '{"score":int,"perfect_probability":int,"perfect_probability_note":str,"commentary":str,"model_answer":str,"reasons":[str]}。'
-        "commentary の冒頭に『10点中◯点』を必ず含める。"
+        '{"score_total":int,"good_points":[str,str],"next_step":str,'
+        '"rubric":{"conclusion":int,"logic":int,"wording":int},'
+        '"best_sentence":str,"short_comment":str,"rewrite_tip":str,'
+        '"perfect_probability":int,"perfect_probability_note":str,'
+        '"model_answer":str,"reasons":[str]}。'
+        "rubric の各項目は0〜3の整数（結論の明確さ/理由の筋道/用語・表現の適切さ）。"
+        "good_points は短い文を2つ、next_step は1つ。"
+        "short_comment は1〜2行で簡潔に。"
+        "best_sentence は受験者の解答から最も良い一文を抜粋。"
         "reasons は3〜6個、箇条書きの短文。"
         "日本語で丁寧かつ簡潔に。"
     )
@@ -662,7 +659,7 @@ def status():
         },
         "codes": {
             "ACCESS_CODE": preview(ACCESS_CODE),
-            "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
+            "EXPORT_CODE": preview(EXPORT_CODE),
         }
     }), 200
 
@@ -679,7 +676,7 @@ def env_check():
         "ALLOWED_ORIGIN": CORS_ORIGINS,
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
-        "EXPORT_ACCESS_CODE": preview(EXPORT_ACCESS_CODE),
+        "EXPORT_CODE": preview(EXPORT_CODE),
         "MODEL_ID": MODEL_ID,
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
@@ -727,6 +724,55 @@ def api_usage():
         "remaining": remaining,
         "reset_at": _next_reset_iso(),
     }), 200
+
+# =========================
+# フィードバック
+# =========================
+@app.post("/feedback")
+def feedback():
+    payload = request.get_json(silent=True) or {}
+    if not payload and request.form:
+        payload = request.form.to_dict()
+
+    f_type = normalize_text(payload.get("type", "")) or "feedback"
+    role = normalize_text(payload.get("role", "")) or "unknown"
+    email = normalize_text(payload.get("email", ""))[:200]
+    message = normalize_text(payload.get("message", ""))
+    context = payload.get("context", None)
+    if not isinstance(context, (dict, list, str)) and context is not None:
+        context = str(context)
+
+    continue_score = payload.get("continue_score", None)
+    if continue_score is not None:
+        try:
+            continue_score = int(continue_score)
+        except Exception:
+            continue_score = None
+
+    if f_type == "continue_score":
+        if continue_score is None or continue_score < 0 or continue_score > 10:
+            return jsonify({"ok": False, "error": "continue_score must be 0-10"}), 400
+    else:
+        if not (200 <= len(message) <= 800):
+            return jsonify({"ok": False, "error": "message length must be 200-800 chars"}), 400
+
+    stamp = datetime.now().astimezone()
+    record = {
+        "timestamp": stamp.isoformat(),
+        "type": f_type,
+        "role": role,
+        "email": email,
+        "message": message,
+        "continue_score": continue_score,
+        "context": context,
+        "user_agent": request.headers.get("User-Agent", ""),
+    }
+
+    month_key = stamp.strftime("%Y%m")
+    path = DATA / f"feedback_{month_key}.jsonl"
+    append_jsonl(path, record)
+
+    return jsonify({"ok": True}), 200
 
 # =========================
 # ストック API
@@ -1112,14 +1158,45 @@ def grade_answer():
 
     result = parse_first_json_block(text) or {}
     try:
-        score = int(result.get("score", 0))
+        score_total = int(result.get("score_total", result.get("score", 0)))
     except Exception:
-        score = 0
-    score = max(0, min(10, score))
-    commentary = (result.get("commentary", "") or "").strip()
-    head = f"10点中{score}点"
-    if not commentary.startswith(head):
-        commentary = f"{head}：{commentary}" if commentary else f"{head}。"
+        score_total = 0
+    score_total = max(0, min(10, score_total))
+
+    good_points = result.get("good_points", [])
+    if not isinstance(good_points, list):
+        good_points = [str(good_points)]
+    good_points = [normalize_text(str(x))[:120] for x in good_points if str(x).strip()]
+    while len(good_points) < 2:
+        good_points.append("問いに沿った要素が書けています")
+    good_points = good_points[:2]
+
+    next_step = normalize_text(result.get("next_step", ""))[:120] or "結論→理由の順で1文だけ言い換えてみよう"
+
+    rubric_raw = result.get("rubric", {}) if isinstance(result.get("rubric", {}), dict) else {}
+    def _rubric_score(key: str) -> int:
+        try:
+            val = int(rubric_raw.get(key, 0))
+        except Exception:
+            val = 0
+        return max(0, min(3, val))
+    rubric = {
+        "conclusion": _rubric_score("conclusion"),
+        "logic": _rubric_score("logic"),
+        "wording": _rubric_score("wording"),
+    }
+
+    best_sentence = (result.get("best_sentence", "") or "").strip()
+    short_comment = (result.get("short_comment", "") or "").strip()
+    rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
+
+    commentary_raw = (result.get("commentary", "") or short_comment).strip()
+    head = f"10点中{score_total}点"
+    if not commentary_raw.startswith(head):
+        commentary = f"{head}：{commentary_raw}" if commentary_raw else f"{head}。"
+    else:
+        commentary = commentary_raw
+
     reasons = result.get("reasons", [])
     if not isinstance(reasons, list):
         reasons = [str(reasons)]
@@ -1138,7 +1215,7 @@ def grade_answer():
             prob = None
 
     if prob is None:
-        prob = int(round(score * 10))
+        prob = int(round(score_total * 10))
         if not prob_note:
             prob_note = "スコアからの簡易推定"
 
@@ -1148,16 +1225,61 @@ def grade_answer():
         "event": "graded",
         "question": data["question"],
         "student_answer": data["student_answer"],
-        "score": score,
+        "score": score_total,
         "perfect_probability": prob,
         "ts": now_ms()
     })
 
+    prev = session.get("last_result") or {}
+    improvements: List[str] = []
+    rubric_diff = {}
+    prev_score_total = None
+    if prev and prev.get("question") == data["question"]:
+        prev_score_total = int(prev.get("score_total", 0))
+        prev_rubric = prev.get("rubric", {}) if isinstance(prev.get("rubric", {}), dict) else {}
+        labels = {
+            "conclusion": "結論の明確さ",
+            "logic": "理由の筋道",
+            "wording": "用語・表現の適切さ",
+        }
+        for key, label in labels.items():
+            prev_val = int(prev_rubric.get(key, 0))
+            diff = rubric.get(key, 0) - prev_val
+            rubric_diff[key] = diff
+            if diff > 0:
+                improvements.append(f"{label}が前回より良くなりました")
+        if score_total > prev_score_total and len(improvements) < 2:
+            improvements.append("総合点が前回より上がりました")
+        improvements = improvements[:2]
+    else:
+        rubric_diff = {k: 0 for k in rubric.keys()}
+
+    session["last_result"] = {
+        "question": data["question"],
+        "answer": data["student_answer"],
+        "score_total": score_total,
+        "rubric": rubric,
+        "good_points": good_points,
+        "best_sentence": best_sentence,
+        "short_comment": short_comment,
+        "ts": now_ms(),
+    }
+
     _update_metrics("grade", True, t0)
     return jsonify({
         "ok": True,
-        "score": score,
+        "score": score_total,
+        "score_total": score_total,
         "commentary": commentary,
+        "short_comment": short_comment,
+        "good_points": good_points,
+        "next_step": next_step,
+        "rubric": rubric,
+        "best_sentence": best_sentence,
+        "rewrite_tip": rewrite_tip,
+        "improvements": improvements,
+        "rubric_diff": rubric_diff,
+        "previous_score_total": prev_score_total,
         "model_answer": model_ans,
         "reasons": reasons,
         "perfect_probability": prob,

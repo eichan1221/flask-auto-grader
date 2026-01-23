@@ -106,3 +106,31 @@ textarea{min-height:120px;resize:vertical}
 .step h3{ margin:0 0 6px; font-size:15px; }
 .step ol, .step ul{ margin:8px 0 0; padding-left:18px; line-height:1.75; }
 .step .mini{ font-size:12px; color:var(--muted); margin-top:6px; }
+
+/* 結果ヘッダブロック */
+.result-header{background:linear-gradient(180deg,#fff,#f7f2ff)}
+.rubric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:8px}
+@media (max-width:700px){.rubric-grid{grid-template-columns:1fr}}
+.rubric-item{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;background:#fff}
+.rubric-score{font-weight:700;color:#111827}
+.rubric-diff{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.rubric-diff .diff{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px}
+.rubric-diff .diff.up{color:var(--ok);border-color:rgba(34,197,94,0.4)}
+.rubric-diff .diff.down{color:var(--err);border-color:rgba(239,68,68,0.4)}
+.rubric-diff .diff.same{color:var(--muted)}
+
+/* 続けたい度 */
+.continue-score{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.continue-score .chip{border:1px solid var(--border);background:#fff;border-radius:999px;padding:6px 10px;font-weight:600;cursor:pointer}
+.continue-score .chip:hover{border-color:var(--brand);color:var(--brand-strong)}
+.continue-score .chip.selected{background:var(--brand);border-color:var(--brand);color:#fff}
+.continue-score .chip:disabled{opacity:0.6;cursor:not-allowed}
+
+/* フィードバック */
+.feedback-fab{
+  position:fixed;right:18px;bottom:72px;z-index:20;
+  background:var(--brand);color:#fff;border:none;border-radius:999px;
+  padding:10px 16px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,0.18);cursor:pointer
+}
+.feedback-fab:hover{background:var(--brand-strong)}
+.feedback-form textarea{min-height:180px}

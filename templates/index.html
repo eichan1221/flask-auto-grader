@@ -21,9 +21,6 @@
         <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
         <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
 
-        <!-- ✅ 追加：フィードバック（フォームを小ウィンドウ表示） -->
-        <button class="btn" id="btnFeedback" title="フィードバックフォームを開く">フィードバック</button>
-
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
       </div>
@@ -44,19 +41,12 @@
         <div>
           <label for="accessCode">ACCESS_CODE（保護API用 / 任意）</label>
           <input type="text" id="accessCode" placeholder="ヘッダーに X-Access-Code として付与" aria-describedby="accessCodeHelp" />
-          <div id="accessCodeHelp" class="small muted">設定すると生成・採点・削除・エクスポートに必要な認証ヘッダーが付与されます。</div>
+          <div id="accessCodeHelp" class="small muted">設定すると生成・採点・削除などの保護APIに認証ヘッダーが付与されます。</div>
         </div>
-      </div>
-
-      <!-- ✅ 追加：フィードバックフォームURL（任意） -->
-      <div style="margin-top:12px">
-        <label for="feedbackUrl">フィードバックフォームURL（任意）</label>
-        <input type="text" id="feedbackUrl"
-               placeholder="例 https://docs.google.com/forms/d/e/xxxx/viewform"
-               aria-describedby="feedbackUrlHelp" />
-        <div id="feedbackUrlHelp" class="small muted">
-          ここに入れると右上「フィードバック」からフォームを画面内に表示できます。<br>
-          ※ forms.gle の短縮URLでも動くことがありますが、埋め込みが不安定な場合は「/viewform」形式のURL推奨です。
+        <div>
+          <label for="exportCode">EXPORT_CODE（DL/ログ用 / 任意）</label>
+          <input type="text" id="exportCode" placeholder="ヘッダーに X-Export-Code として付与" aria-describedby="exportCodeHelp" />
+          <div id="exportCodeHelp" class="small muted">DL/ログ系のエクスポートは別コードで保護されます。</div>
         </div>
       </div>
 
@@ -247,9 +237,70 @@
         </div>
 
         <div id="gradeResult" style="margin-top:12px;display:none">
+          <div class="qcard mini" id="continueScoreCard">
+            <div class="small muted">このアプリ、続けたいですか？（0〜10）</div>
+            <div class="continue-score" id="continueScoreButtons" role="group" aria-label="続けたい度の選択">
+              <button class="chip" data-score="0">0</button>
+              <button class="chip" data-score="1">1</button>
+              <button class="chip" data-score="2">2</button>
+              <button class="chip" data-score="3">3</button>
+              <button class="chip" data-score="4">4</button>
+              <button class="chip" data-score="5">5</button>
+              <button class="chip" data-score="6">6</button>
+              <button class="chip" data-score="7">7</button>
+              <button class="chip" data-score="8">8</button>
+              <button class="chip" data-score="9">9</button>
+              <button class="chip" data-score="10">10</button>
+            </div>
+            <div class="small muted" id="continueScoreStatus"></div>
+          </div>
+
+          <div class="qcard result-header" id="resultHeader">
+            <div class="flex" style="justify-content:space-between;gap:10px">
+              <div>
+                <div class="caps">今回の得点</div>
+                <div id="scoreLine" class="success" style="font-weight:700;font-size:20px"></div>
+                <div id="shortComment" class="small muted" style="margin-top:4px"></div>
+              </div>
+              <div class="pill" id="rewriteTipWrap" style="display:none">
+                <span class="small muted">書き直しのコツ：</span>
+                <span id="rewriteTip"></span>
+              </div>
+            </div>
+
+            <div class="grid-2" style="margin-top:10px">
+              <div>
+                <div class="small muted">✅ 今回の良かった点</div>
+                <ul id="goodPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+              </div>
+              <div>
+                <div class="small muted">🎯 次回はここだけ直そう</div>
+                <div id="nextStep" style="margin-top:6px"></div>
+              </div>
+            </div>
+
+            <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">ルーブリック（毎回同じ尺度）</div>
+            <div class="rubric-grid" id="rubricScores"></div>
+
+            <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">あなたの一番良い一文</div>
+            <div id="bestSentence" class="mono" style="margin-top:6px"></div>
+
+            <div id="improvementsWrap" style="display:none;margin-top:12px">
+              <div class="small muted">前回より改善した点</div>
+              <ul id="improvements" style="margin:6px 0 0;padding-left:18px"></ul>
+              <div class="small muted" style="margin-top:6px">ルーブリックの前回比</div>
+              <div id="rubricDiff" class="rubric-diff"></div>
+            </div>
+
+            <div class="flex" style="gap:8px;margin-top:12px">
+              <button class="btn brand" id="btnRewrite">書き直して再提出</button>
+            </div>
+          </div>
+
           <h3>採点結果</h3>
           <div class="qcard">
-            <div id="scoreLine" class="success" style="font-weight:700"></div>
 
             <!-- ✅ 満点確率表示 -->
             <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
@@ -400,7 +451,7 @@
   </div>
 
   <!-- =========================
-       ✅ フィードバックフォーム モーダル（埋め込み）
+       ✅ フィードバック モーダル
        ========================= -->
   <div class="modal" id="feedbackModal" aria-hidden="true">
     <div class="panel" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
@@ -410,37 +461,46 @@
           <div class="small muted">※個人名・学校名などの個人情報は入力しないでください。</div>
         </div>
         <div class="flex" style="gap:8px">
-          <a class="btn" id="btnFeedbackOpenExternal" href="#" target="_blank" rel="noopener">別タブで開く</a>
           <button class="btn" id="btnFeedbackClose" aria-label="フィードバックを閉じる">閉じる</button>
         </div>
       </div>
 
       <div class="panelBody">
-        <div class="small muted" id="feedbackStatus" style="margin-bottom:8px"></div>
-        <iframe
-          id="feedbackFrame"
-          title="フィードバックフォーム"
-          style="width:100%;height:72vh;border:1px solid rgba(0,0,0,0.08);border-radius:12px;background:#fff;"
-          referrerpolicy="no-referrer-when-downgrade"
-          loading="lazy"
-          src="">
-        </iframe>
-
-        <div class="small muted" style="margin-top:10px">
-          もしフォームが表示されない場合：上の「別タブで開く」から回答してください。
-        </div>
+        <form id="feedbackForm" class="feedback-form">
+          <div class="grid-2">
+            <div>
+              <label for="feedbackRole">立場</label>
+              <select id="feedbackRole">
+                <option value="teacher">講師</option>
+                <option value="student">生徒</option>
+                <option value="parent">保護者</option>
+                <option value="other">その他</option>
+              </select>
+            </div>
+            <div>
+              <label for="feedbackEmail">メール（任意）</label>
+              <input type="text" id="feedbackEmail" placeholder="example@example.com">
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <label for="feedbackMessage">本文（必須・200〜800文字）</label>
+            <textarea id="feedbackMessage" minlength="200" maxlength="800" placeholder="どの場面で良かった/困ったか、具体的に教えてください。"></textarea>
+            <div class="small muted" id="feedbackCount">0 / 800</div>
+          </div>
+          <div class="flex" style="margin-top:12px">
+            <button class="btn brand" id="btnSubmitFeedback" type="submit">送信する</button>
+            <span class="small muted" id="feedbackStatus"></span>
+          </div>
+        </form>
       </div>
     </div>
   </div>
 
+  <button class="feedback-fab" id="btnFeedback" type="button">フィードバック</button>
+
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
-    // =========================
-    // ✅ フィードバックフォームのデフォルトURL（ここに貼ってOK）
-    // =========================
-    const DEFAULT_FEEDBACK_URL = ""; // 例: "https://docs.google.com/forms/d/e/xxxx/viewform"
-
     // ---- 設定の永続化 ----
     const $ = (q)=>document.querySelector(q);
     const cfg = {
@@ -448,97 +508,11 @@
       set baseUrl(v){ localStorage.setItem('baseUrl', v||''); },
       get accessCode(){ return localStorage.getItem('accessCode') || ''; },
       set accessCode(v){ localStorage.setItem('accessCode', v||''); },
-
-      // ✅ 追加：フィードバックURL
-      get feedbackUrl(){ return localStorage.getItem('feedbackUrl') || ''; },
-      set feedbackUrl(v){ localStorage.setItem('feedbackUrl', v||''); },
+      get exportCode(){ return localStorage.getItem('exportCode') || ''; },
+      set exportCode(v){ localStorage.setItem('exportCode', v||''); },
 
       endpoint(p){ const b=this.baseUrl.trim(); return (b?b.replace(/\/$/,''):'') + p; }
     };
-
-    // ✅ フィードバックURLの解決（設定が優先）
-    function resolveFeedbackUrl(){
-      const u = (cfg.feedbackUrl || '').trim();
-      if(u) return u;
-      return (DEFAULT_FEEDBACK_URL || '').trim();
-    }
-
-    // ✅ Googleフォーム埋め込み用URLに整形
-    function toEmbedUrl(url){
-      const u = (url || '').trim();
-      if(!u) return "";
-
-      // すでに embedded=true があればそのまま
-      if(u.includes('embedded=true')) return u;
-
-      // viewform 形式なら embedded=true を付ける
-      if(u.includes('/viewform')){
-        return u.includes('?')
-          ? (u + '&embedded=true')
-          : (u + '?embedded=true');
-      }
-
-      // forms.gle の短縮はそのまま（埋め込みが不安定な場合あり）
-      return u;
-    }
-
-    function applyFeedbackUI(){
-      const btn = $('#btnFeedback');
-      const url = resolveFeedbackUrl();
-      if(!btn) return;
-
-      // URLが空なら案内
-      if(!url){
-        btn.dataset.ready = "0";
-        return;
-      }
-      btn.dataset.ready = "1";
-
-      // external link 更新
-      const ext = $('#btnFeedbackOpenExternal');
-      if(ext){
-        ext.href = url;
-      }
-    }
-
-    function openFeedback(){
-      const url = resolveFeedbackUrl();
-      if(!url){
-        alert('フィードバックフォームURLが未設定です。\n右上「設定」→「フィードバックフォームURL」に貼り付けて保存してください。');
-        return;
-      }
-      const modal = $('#feedbackModal');
-      const frame = $('#feedbackFrame');
-      const st = $('#feedbackStatus');
-      const ext = $('#btnFeedbackOpenExternal');
-
-      if(ext) ext.href = url;
-
-      // 埋め込みURL
-      const embed = toEmbedUrl(url);
-      if(frame) frame.src = embed || url;
-
-      if(st){
-        st.textContent = (embed && embed !== url)
-          ? 'フォームを埋め込み表示しています。'
-          : 'フォームを表示しています（表示されない場合は「別タブで開く」を利用してください）。';
-      }
-
-      modal.classList.add('show');
-      modal.setAttribute('aria-hidden','false');
-      setTimeout(()=>{ $('#btnFeedbackClose')?.focus(); }, 0);
-    }
-
-    function closeFeedback(){
-      const modal = $('#feedbackModal');
-      const frame = $('#feedbackFrame');
-      modal.classList.remove('show');
-      modal.setAttribute('aria-hidden','true');
-
-      // iframeを停止（戻った時に再読み込みしたい場合）
-      if(frame) frame.src = "";
-      setTimeout(()=>{ $('#btnFeedback')?.focus(); }, 0);
-    }
 
     // ---- 追加：観点（固定表示のデフォルト） ----
     const DEFAULT_RUBRIC = [
@@ -575,11 +549,31 @@
       hintEl.textContent = (hint || DEFAULT_RUBRIC_HINT);
     }
 
+    function resetContinueScoreUI(){
+      const status = $('#continueScoreStatus');
+      const buttons = document.querySelectorAll('#continueScoreButtons .chip');
+      buttons.forEach(btn=>{
+        btn.disabled = false;
+        btn.classList.remove('selected');
+      });
+      if(status) status.textContent = '';
+    }
+
     function clearGradeResultUI(){
       const gr = $('#gradeResult');
       if(gr) gr.style.display = 'none';
 
       const scoreLine = $('#scoreLine'); if(scoreLine) scoreLine.textContent = '';
+      const shortComment = $('#shortComment'); if(shortComment) shortComment.textContent = '';
+      const goodPoints = $('#goodPoints'); if(goodPoints) goodPoints.innerHTML = '';
+      const nextStep = $('#nextStep'); if(nextStep) nextStep.textContent = '';
+      const rubricScores = $('#rubricScores'); if(rubricScores) rubricScores.innerHTML = '';
+      const bestSentence = $('#bestSentence'); if(bestSentence) bestSentence.textContent = '';
+      const rewriteTipWrap = $('#rewriteTipWrap'); if(rewriteTipWrap) rewriteTipWrap.style.display = 'none';
+      const rewriteTip = $('#rewriteTip'); if(rewriteTip) rewriteTip.textContent = '';
+      const improvementsWrap = $('#improvementsWrap'); if(improvementsWrap) improvementsWrap.style.display = 'none';
+      const improvements = $('#improvements'); if(improvements) improvements.innerHTML = '';
+      const rubricDiff = $('#rubricDiff'); if(rubricDiff) rubricDiff.innerHTML = '';
       const perfectProbLine = $('#perfectProbLine'); if(perfectProbLine) perfectProbLine.textContent = '';
       const commentary = $('#commentary'); if(commentary) commentary.textContent = '';
       const gradedModel = $('#gradedModel'); if(gradedModel) gradedModel.textContent = '';
@@ -593,6 +587,8 @@
 
       const pmWrap = $('#practiceMenuWrap'); if(pmWrap) pmWrap.style.display = 'none';
       const pm = $('#practiceMenu'); if(pm) pm.innerHTML = '';
+
+      resetContinueScoreUI();
     }
 
     // ---- 共通Fetch ----
@@ -660,6 +656,25 @@
       setTimeout(()=>t.classList.remove('show'), 2200);
     }
 
+    async function postFeedback(payload){
+      const res = await fetch(cfg.endpoint('/feedback'), {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload || {})
+      });
+      let data = null;
+      try{
+        data = await res.json();
+      }catch(e){
+        data = null;
+      }
+      if(!res.ok){
+        const msg = data?.error ? `: ${data.error}` : '';
+        throw new Error(`${res.status} ${res.statusText}${msg}`);
+      }
+      return data || {};
+    }
+
     function buildQueryString(params){
       const sp = new URLSearchParams();
       Object.entries(params || {}).forEach(([k,v])=>{
@@ -676,20 +691,21 @@
     let subject = '社会';
     let currentItem = null;
     let generatedRaw = null;
+    let lastGradeResult = null;
+    let lastGradedAnswer = '';
 
     // ---- 設定UI ----
     function loadSettings(){
       $('#baseUrl').value = cfg.baseUrl;
       $('#accessCode').value = cfg.accessCode;
-      $('#feedbackUrl').value = cfg.feedbackUrl; // ✅ 追加
+      $('#exportCode').value = cfg.exportCode;
     }
     function saveSettings(){
       cfg.baseUrl = $('#baseUrl').value.trim();
       cfg.accessCode = $('#accessCode').value.trim();
-      cfg.feedbackUrl = $('#feedbackUrl').value.trim(); // ✅ 追加
+      cfg.exportCode = $('#exportCode').value.trim();
       $('#statusLine').textContent = '保存しました';
       setTimeout(()=>$('#statusLine').textContent='', 1500);
-      applyFeedbackUI();
     }
 
     // ---- 学年とカテゴリの整合（理科：天体は中3のみ）----
@@ -745,9 +761,7 @@
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
-
-      // ✅ フィードバックUI反映
-      applyFeedbackUI();
+      updateFeedbackCount();
 
       renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
 
@@ -965,6 +979,168 @@
       toast('採点対象にセットしました');
     }
 
+    function renderResultHeader(r){
+      const score = r?.score_total ?? r?.score ?? 0;
+      $('#scoreLine').textContent = `10点中${score}点`;
+      $('#shortComment').textContent = r?.short_comment || '';
+
+      const gp = $('#goodPoints'); gp.innerHTML = '';
+      (r?.good_points || []).forEach(t=>{
+        const li = document.createElement('li');
+        li.textContent = t;
+        gp.appendChild(li);
+      });
+
+      $('#nextStep').textContent = r?.next_step || '';
+
+      const rubricScores = $('#rubricScores');
+      rubricScores.innerHTML = '';
+      const rubric = r?.rubric || {};
+      const labels = [
+        {key:'conclusion', label:'結論の明確さ'},
+        {key:'logic', label:'理由の筋道'},
+        {key:'wording', label:'用語・表現の適切さ'}
+      ];
+      labels.forEach(({key,label})=>{
+        const val = rubric[key] ?? 0;
+        const div = document.createElement('div');
+        div.className = 'rubric-item';
+        div.innerHTML = `<span class="small muted">${label}</span><span class="rubric-score">${val}/3</span>`;
+        rubricScores.appendChild(div);
+      });
+
+      $('#bestSentence').textContent = r?.best_sentence || '';
+
+      const tipWrap = $('#rewriteTipWrap');
+      const tip = (r?.rewrite_tip || '').trim();
+      if(tip){
+        tipWrap.style.display = '';
+        $('#rewriteTip').textContent = tip;
+      }else{
+        tipWrap.style.display = 'none';
+        $('#rewriteTip').textContent = '';
+      }
+
+      const improvements = Array.isArray(r?.improvements) ? r.improvements : [];
+      const improvementsWrap = $('#improvementsWrap');
+      const improvementsList = $('#improvements');
+      const rubricDiff = $('#rubricDiff');
+      improvementsList.innerHTML = '';
+      rubricDiff.innerHTML = '';
+      if(improvements.length){
+        improvementsWrap.style.display = '';
+        improvements.forEach(s=>{
+          const li = document.createElement('li');
+          li.textContent = s;
+          improvementsList.appendChild(li);
+        });
+        const diff = r?.rubric_diff || {};
+        labels.forEach(({key,label})=>{
+          const d = diff[key] ?? 0;
+          const span = document.createElement('span');
+          span.className = `diff ${d > 0 ? 'up' : d < 0 ? 'down' : 'same'}`;
+          const sign = d > 0 ? `+${d}` : `${d}`;
+          span.textContent = `${label} ${sign}`;
+          rubricDiff.appendChild(span);
+        });
+      }else{
+        improvementsWrap.style.display = 'none';
+      }
+    }
+
+    async function sendContinueScore(score, btn){
+      const status = $('#continueScoreStatus');
+      const role = localStorage.getItem('feedbackRole') || 'unknown';
+      const context = {};
+      if(currentItem){
+        if(currentItem.subject) context.subject = currentItem.subject;
+        if(currentItem.category) context.category = currentItem.category;
+        if(currentItem.grade) context.grade = currentItem.grade;
+        if(currentItem.difficulty) context.difficulty = currentItem.difficulty;
+        if(currentItem.question) context.question = currentItem.question.slice(0, 160);
+      }
+      if(lastGradeResult){
+        const scoreTotal = lastGradeResult.score_total ?? lastGradeResult.score;
+        if(scoreTotal !== undefined) context.score_total = scoreTotal;
+        if(lastGradeResult.rubric) context.rubric = lastGradeResult.rubric;
+      }
+      if(lastGradedAnswer) context.answer_length = lastGradedAnswer.length;
+
+      try{
+        if(status) status.textContent = '送信中...';
+        await postFeedback({
+          type: 'continue_score',
+          continue_score: score,
+          role,
+          context
+        });
+        const buttons = document.querySelectorAll('#continueScoreButtons .chip');
+        buttons.forEach(b=>{
+          b.disabled = true;
+          b.classList.remove('selected');
+        });
+        if(btn) btn.classList.add('selected');
+        if(status) status.textContent = '送信しました。ありがとうございます！';
+      }catch(e){
+        if(status) status.textContent = '送信に失敗しました。';
+        toast('送信に失敗しました: ' + e.message, false);
+      }
+    }
+
+    function openFeedback(){
+      const modal = $('#feedbackModal');
+      const status = $('#feedbackStatus');
+      if(status) status.textContent = '';
+      const savedRole = localStorage.getItem('feedbackRole');
+      if(savedRole) $('#feedbackRole').value = savedRole;
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden','false');
+      setTimeout(()=>{ $('#feedbackMessage')?.focus(); }, 0);
+    }
+
+    function closeFeedback(){
+      const modal = $('#feedbackModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ $('#btnFeedback')?.focus(); }, 0);
+    }
+
+    function updateFeedbackCount(){
+      const msg = $('#feedbackMessage').value || '';
+      const count = msg.length;
+      const counter = $('#feedbackCount');
+      if(counter) counter.textContent = `${count} / 800`;
+    }
+
+    async function handleFeedbackSubmit(e){
+      e.preventDefault();
+      const role = $('#feedbackRole').value;
+      const email = $('#feedbackEmail').value.trim();
+      const message = $('#feedbackMessage').value.trim();
+      const status = $('#feedbackStatus');
+      if(message.length < 200 || message.length > 800){
+        if(status) status.textContent = '本文は200〜800文字で入力してください。';
+        return;
+      }
+      if(status) status.textContent = '送信中...';
+      try{
+        await postFeedback({
+          type: 'feedback',
+          role,
+          email,
+          message
+        });
+        localStorage.setItem('feedbackRole', role);
+        toast('送信しました。ありがとうございます！');
+        closeFeedback();
+        $('#feedbackMessage').value = '';
+        updateFeedbackCount();
+      }catch(err){
+        if(status) status.textContent = '送信に失敗しました。';
+        toast('送信に失敗しました: ' + err.message, false);
+      }
+    }
+
     // ---- 採点 ----
     async function handleGrade(){
       if(!currentItem || !currentItem.question){
@@ -991,7 +1167,12 @@
         }
 
         $('#gradeResult').style.display='';
-        $('#scoreLine').textContent = `スコア: 10点中${r.score}点`;
+        renderResultHeader(r);
+        resetContinueScoreUI();
+
+        lastGradeResult = r;
+        lastGradedAnswer = body.student_answer;
+
         $('#commentary').textContent = r.commentary || '';
         $('#gradedModel').textContent = r.model_answer || '';
 
@@ -1082,7 +1263,7 @@
     // ---- エクスポート（ヘッダー付きDL）----
     async function downloadEndpoint(path, filename){
       const headers = {};
-      if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
+      if(cfg.exportCode) headers['X-Export-Code'] = cfg.exportCode;
       const res = await fetch(cfg.endpoint(path), {headers});
       if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const blob = await res.blob();
@@ -1170,6 +1351,25 @@
       toast('同じ問題で再挑戦できます');
     };
 
+    $('#btnRewrite').onclick = ()=>{
+      if(!lastGradedAnswer){
+        toast('まず採点してください', false);
+        return;
+      }
+      $('#studentAnswer').value = lastGradedAnswer;
+      $('#studentAnswer').focus();
+      toast('前回の解答を読み直して書き直しましょう');
+    };
+
+    document.querySelectorAll('#continueScoreButtons .chip').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(btn.disabled) return;
+        const score = Number(btn.dataset.score);
+        if(Number.isNaN(score)) return;
+        sendContinueScore(score, btn);
+      });
+    });
+
     $('#btnExportJson').onclick = ()=> downloadEndpoint('/api/export/stocks.json', 'stocks.json').catch(e=>toast('DL失敗: '+e.message,false));
     $('#btnExportCsv').onclick = ()=> downloadEndpoint('/api/export/stocks.csv', 'stocks.csv').catch(e=>toast('DL失敗: '+e.message,false));
     $('#btnExportGrading').onclick = ()=> downloadEndpoint('/api/export/grading.jsonl', 'grading.jsonl').catch(e=>toast('DL失敗: '+e.message,false));
@@ -1198,6 +1398,8 @@
     $('#feedbackModal').addEventListener('click', (e)=>{
       if(e.target === e.currentTarget) closeFeedback();
     });
+    $('#feedbackForm').addEventListener('submit', handleFeedbackSubmit);
+    $('#feedbackMessage').addEventListener('input', updateFeedbackCount);
 
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
