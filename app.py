@@ -122,7 +122,7 @@ ALLOWED_CAT_BY_SUBJECT = {
     "理科": {"生物", "化学", "地学", "物理", "天体"},
 }
 ALLOWED_GRADES = {"中1", "中2", "中3"}
-ALLOWED_DIFFICULTY = {"5点", "10点", "満点"}  # 生成時の難易度ヒント用（採点は常に10点満点表示）
+ALLOWED_DIFFICULTY = {"5点", "10点", "満点"}  # 生成時の難易度ヒント用（採点はUI側で配点表示）
 
 # メトリクス
 METRICS = {
@@ -198,8 +198,19 @@ def save_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
                 pass
     return item
 
-def find_duplicate_in_stocks(question_text: str) -> Optional[Dict[str, Any]]:
+def find_duplicate_in_stocks(
+    question_text: str,
+    subject: Optional[str] = None,
+    category: Optional[str] = None,
+    grade: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     for it in current_stocks():
+        if subject and it.get("subject") != subject:
+            continue
+        if category and it.get("category") != category:
+            continue
+        if grade and it.get("grade") != grade:
+            continue
         if is_similar(it.get("question", ""), question_text):
             return it
     return None
@@ -215,12 +226,38 @@ def recent_tags(limit: int = 8) -> List[str]:
                 return tags
     return tags
 
+def recent_questions(limit: int = 10, subject: Optional[str] = None, category: Optional[str] = None, grade: Optional[str] = None) -> List[str]:
+    questions: List[str] = []
+    for it in current_stocks():
+        if subject and it.get("subject") != subject:
+            continue
+        if category and it.get("category") != category:
+            continue
+        if grade and it.get("grade") != grade:
+            continue
+        q = normalize_text(it.get("question", ""))
+        if q:
+            questions.append(q)
+        if len(questions) >= limit:
+            break
+    return questions
+
 def ensure_openai() -> Optional[str]:
     if client is None:
         return "OpenAI SDKの初期化に失敗しています（openai>=1.x と OPENAI_API_KEY を確認）。"
     if not os.getenv("OPENAI_API_KEY"):
         return "OPENAI_API_KEY が未設定です。"
     return None
+
+def difficulty_max_score(difficulty: str) -> int:
+    if difficulty == "5点":
+        return 5
+    return 10
+
+def difficulty_label(difficulty: str) -> str:
+    if difficulty == "満点":
+        return "満点"
+    return f"{difficulty_max_score(difficulty)}点"
 
 def parse_first_json_block(text: str) -> Dict[str, Any]:
     # モデル出力がJSON以外を含む場合の保険（最初の { ... } を抽出）
@@ -561,10 +598,13 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     sa = payload["student_answer"]
     ma = payload.get("model_answer", "")
     difficulty = payload["difficulty"]
+    max_score = difficulty_max_score(difficulty)
+    label = difficulty_label(difficulty)
 
     sysprompt = (
         "あなたは中学生の記述解答を採点する試験官です。"
         "採点は0〜10点の整数。"
+        "参考解答と同等の内容であれば10点にしてください（満点例）。"
         "さらに『入試本番で満点（○）になる確率』を0〜100の整数で推定し、"
         "短い根拠を perfect_probability_note に書いてください。"
         "確率は『満点になる確率』なので、score_totalが10でも100とは限りません（表現の曖昧さ・要点漏れの可能性を考慮）。"
@@ -573,19 +613,23 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         '"rubric":{"conclusion":int,"logic":int,"wording":int},'
         '"best_sentence":str,"short_comment":str,"rewrite_tip":str,'
         '"perfect_probability":int,"perfect_probability_note":str,'
-        '"model_answer":str,"reasons":[str]}。'
+        '"model_answer":str,"reasons":[str],'
+        '"full_score_criteria":[str],"full_score_example":str}。'
         "rubric の各項目は0〜3の整数（結論の明確さ/理由の筋道/用語・表現の適切さ）。"
         "good_points は短い文を2つ、next_step は1つ。"
         "short_comment は1〜2行で簡潔に。"
         "best_sentence は受験者の解答から最も良い一文を抜粋。"
         "reasons は3〜6個、箇条書きの短文。"
+        "full_score_criteria は満点に必要な要素を3つ程度、短く箇条書きで。"
+        "full_score_example は満点になりやすい短い例文（参考解答と同等でも可）。"
+        "next_step は「具体例は1つでOK」を満たし、次の型で短く示す: 結論→理由→具体例1つ。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
         f"問題: {q}\n"
         f"受験者の解答: {sa}\n"
         f"参考解答（任意）: {ma or '（なし）'}\n"
-        f"配点設定: {difficulty}\n"
+        f"配点設定: {difficulty}（表示上の満点: {label} / {max_score}点）\n"
         "評価観点：正確性/要点の網羅/論理性/表現の明瞭さ。"
     )
     return [{"role": "system", "content": sysprompt},
@@ -779,7 +823,20 @@ def feedback():
 # =========================
 @app.get("/api/stock/list")
 def stock_list():
-    items = current_stocks()
+    subject = request.args.get("subject", "")
+    category = request.args.get("category", "")
+    grade = request.args.get("grade", "")
+
+    def match(it: Dict[str, Any]) -> bool:
+        if subject and it.get("subject") != subject:
+            return False
+        if category and it.get("category") != category:
+            return False
+        if grade and it.get("grade") != grade:
+            return False
+        return True
+
+    items = [it for it in current_stocks() if match(it)]
     # ✅ 生徒にヒントを見せない（講師コードが無ければヒントを落とす）
     if not _is_teacher_request():
         items = [_strip_hints(dict(it)) for it in items]
@@ -878,10 +935,6 @@ def stock_add():
     if not question:
         return jsonify({"error": "question is required"}), 400
 
-    dup = find_duplicate_in_stocks(question)
-    if dup:
-        return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup}), 200
-
     subject = data.get("subject", "")[:20]
     if subject not in ALLOWED_SUBJECTS:
         subject = ""
@@ -891,6 +944,10 @@ def stock_add():
     grade = data.get("grade", "")[:10]
     if grade and grade not in ALLOWED_GRADES:
         grade = ""
+
+    dup = find_duplicate_in_stocks(question, subject=subject, category=category, grade=grade)
+    if dup:
+        return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup}), 200
 
     item = {
         "id": uuid.uuid4().hex,
@@ -974,10 +1031,6 @@ def stock_import():
         if not q:
             skipped += 1
             continue
-        dup_item = find_duplicate_in_stocks(q)
-        if dup_item and skip_dup and not overwrite:
-            skipped += 1
-            continue
 
         subject = raw.get("subject", "")
         category = raw.get("category", "")
@@ -989,6 +1042,11 @@ def stock_import():
             category = ""
         if grade and grade not in ALLOWED_GRADES:
             grade = ""
+
+        dup_item = find_duplicate_in_stocks(q, subject=subject, category=category, grade=grade)
+        if dup_item and skip_dup and not overwrite:
+            skipped += 1
+            continue
 
         item = {
             "id": raw.get("id") or uuid.uuid4().hex,
@@ -1051,37 +1109,61 @@ def generate_question():
 
     payload_in = request.get_json(force=True, silent=True) or {}
     payload = validate_generation_payload(payload_in)
-    messages = build_generation_messages(payload)
+    recent_qs = recent_questions(limit=10, subject=payload["subject"], category=payload["category"], grade=payload["grade"])
+    question = ""
+    model_answer = ""
+    explanation = ""
+    intention = ""
+    tags: List[str] = []
+    obj: Dict[str, Any] = {}
 
-    try:
-        rsp = client.chat.completions.create(
-            model=MODEL_ID,
-            messages=messages,
-            temperature=0.6,
-            max_tokens=MAX_TOKENS_GEN,
-        )
-        text = (rsp.choices[0].message.content or "").strip()
-    except Exception as e:
-        _update_metrics("generate", False, t0)
-        return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
+    for attempt in range(2):
+        messages = build_generation_messages(payload)
+        try:
+            rsp = client.chat.completions.create(
+                model=MODEL_ID,
+                messages=messages,
+                temperature=0.6,
+                max_tokens=MAX_TOKENS_GEN,
+            )
+            text = (rsp.choices[0].message.content or "").strip()
+        except Exception as e:
+            _update_metrics("generate", False, t0)
+            return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
 
-    obj = parse_first_json_block(text) or {}
-    question = normalize_text(obj.get("question", ""))[:2000]
-    model_answer = normalize_text(obj.get("model_answer", ""))[:2000]
-    explanation = (obj.get("explanation", "") or "").strip()
-    intention = (obj.get("intention", "") or "").strip()
-    tags = obj.get("tags", []) or []
-    if not isinstance(tags, list):
-        tags = [str(tags)]
-    tags = [normalize_text(t)[:20] for t in tags][:10]
+        obj = parse_first_json_block(text) or {}
+        question = normalize_text(obj.get("question", ""))[:2000]
+        model_answer = normalize_text(obj.get("model_answer", ""))[:2000]
+        explanation = (obj.get("explanation", "") or "").strip()
+        intention = (obj.get("intention", "") or "").strip()
+        tags = obj.get("tags", []) or []
+        if not isinstance(tags, list):
+            tags = [str(tags)]
+        tags = [normalize_text(t)[:20] for t in tags][:10]
 
-    if not question:
-        question = normalize_text(text)[:2000]
+        if not question:
+            question = normalize_text(text)[:2000]
+        if not question:
+            continue
+
+        if any(is_similar(question, prev_q) for prev_q in recent_qs):
+            if attempt == 0:
+                payload["avoid_topics"] = normalize_text(
+                    f"{payload.get('avoid_topics', '')}／直近の問題と類似するテーマ"
+                )[:120]
+                continue
+        break
+
     if not question:
         _update_metrics("generate", False, t0)
         return jsonify({"ok": False, "error": "generation failed"}), 502
 
-    dup = find_duplicate_in_stocks(question)
+    dup = find_duplicate_in_stocks(
+        question,
+        subject=payload["subject"],
+        category=payload["category"],
+        grade=payload["grade"],
+    )
     if dup:
         append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated-duplicate", "question": question, "ts": now_ms()})
         _update_metrics("generate", True, t0)
@@ -1158,10 +1240,10 @@ def grade_answer():
 
     result = parse_first_json_block(text) or {}
     try:
-        score_total = int(result.get("score_total", result.get("score", 0)))
+        score_total_raw = int(result.get("score_total", result.get("score", 0)))
     except Exception:
-        score_total = 0
-    score_total = max(0, min(10, score_total))
+        score_total_raw = 0
+    score_total_raw = max(0, min(10, score_total_raw))
 
     good_points = result.get("good_points", [])
     if not isinstance(good_points, list):
@@ -1171,7 +1253,12 @@ def grade_answer():
         good_points.append("問いに沿った要素が書けています")
     good_points = good_points[:2]
 
-    next_step = normalize_text(result.get("next_step", ""))[:120] or "結論→理由の順で1文だけ言い換えてみよう"
+    next_step = normalize_text(result.get("next_step", ""))[:160]
+    template_note = "達成条件: 具体例は1つでOK / 型: 結論→理由→具体例1つ（30〜80字の1文）"
+    if not next_step:
+        next_step = "結論→理由→具体例1つで1文にしてみよう"
+    if template_note not in next_step:
+        next_step = f"{next_step} / {template_note}"
 
     rubric_raw = result.get("rubric", {}) if isinstance(result.get("rubric", {}), dict) else {}
     def _rubric_score(key: str) -> int:
@@ -1190,8 +1277,20 @@ def grade_answer():
     short_comment = (result.get("short_comment", "") or "").strip()
     rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
 
+    max_score = difficulty_max_score(data["difficulty"])
+    score_label = difficulty_label(data["difficulty"])
+
+    model_ans = (data.get("model_answer", "") or result.get("model_answer", "") or "").strip()
+    full_score_example = (result.get("full_score_example", "") or model_ans).strip()
+
+    if model_ans and is_similar(data["student_answer"], model_ans, threshold=0.92):
+        score_total_raw = 10
+
+    score_total_scaled = int(round(score_total_raw * max_score / 10))
+    score_total_scaled = max(0, min(max_score, score_total_scaled))
+
     commentary_raw = (result.get("commentary", "") or short_comment).strip()
-    head = f"10点中{score_total}点"
+    head = f"{score_label}中{score_total_scaled}点"
     if not commentary_raw.startswith(head):
         commentary = f"{head}：{commentary_raw}" if commentary_raw else f"{head}。"
     else:
@@ -1201,7 +1300,13 @@ def grade_answer():
     if not isinstance(reasons, list):
         reasons = [str(reasons)]
     reasons = [normalize_text(str(x))[:200] for x in reasons][:8]
-    model_ans = (result.get("model_answer", "") or data.get("model_answer", "")).strip()
+
+    criteria = result.get("full_score_criteria", [])
+    if not isinstance(criteria, list):
+        criteria = [str(criteria)]
+    criteria = [normalize_text(str(x))[:120] for x in criteria if str(x).strip()]
+    if not criteria:
+        criteria = ["結論が明確", "理由が1つ以上ある", "重要語句が入っている"]
 
     prob_raw = result.get("perfect_probability", None)
     prob_note = (result.get("perfect_probability_note", "") or "").strip()
@@ -1215,7 +1320,7 @@ def grade_answer():
             prob = None
 
     if prob is None:
-        prob = int(round(score_total * 10))
+        prob = int(round(score_total_raw * 10))
         if not prob_note:
             prob_note = "スコアからの簡易推定"
 
@@ -1225,7 +1330,7 @@ def grade_answer():
         "event": "graded",
         "question": data["question"],
         "student_answer": data["student_answer"],
-        "score": score_total,
+        "score": score_total_scaled,
         "perfect_probability": prob,
         "ts": now_ms()
     })
@@ -1235,7 +1340,7 @@ def grade_answer():
     rubric_diff = {}
     prev_score_total = None
     if prev and prev.get("question") == data["question"]:
-        prev_score_total = int(prev.get("score_total", 0))
+        prev_score_total = int(prev.get("score_total_raw", prev.get("score_total", 0)))
         prev_rubric = prev.get("rubric", {}) if isinstance(prev.get("rubric", {}), dict) else {}
         labels = {
             "conclusion": "結論の明確さ",
@@ -1248,7 +1353,7 @@ def grade_answer():
             rubric_diff[key] = diff
             if diff > 0:
                 improvements.append(f"{label}が前回より良くなりました")
-        if score_total > prev_score_total and len(improvements) < 2:
+        if score_total_raw > prev_score_total and len(improvements) < 2:
             improvements.append("総合点が前回より上がりました")
         improvements = improvements[:2]
     else:
@@ -1257,7 +1362,9 @@ def grade_answer():
     session["last_result"] = {
         "question": data["question"],
         "answer": data["student_answer"],
-        "score_total": score_total,
+        "score_total": score_total_scaled,
+        "score_total_raw": score_total_raw,
+        "max_score": max_score,
         "rubric": rubric,
         "good_points": good_points,
         "best_sentence": best_sentence,
@@ -1268,8 +1375,9 @@ def grade_answer():
     _update_metrics("grade", True, t0)
     return jsonify({
         "ok": True,
-        "score": score_total,
-        "score_total": score_total,
+        "score": score_total_scaled,
+        "score_total": score_total_scaled,
+        "score_total_raw": score_total_raw,
         "commentary": commentary,
         "short_comment": short_comment,
         "good_points": good_points,
@@ -1282,9 +1390,12 @@ def grade_answer():
         "previous_score_total": prev_score_total,
         "model_answer": model_ans,
         "reasons": reasons,
+        "full_score_example": full_score_example,
+        "full_score_criteria": criteria,
         "perfect_probability": prob,
         "perfect_probability_note": prob_note,
-        "max_score": 10
+        "max_score": max_score,
+        "score_label": score_label
     }), 200
 
 # =========================
