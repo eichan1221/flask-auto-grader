@@ -90,6 +90,10 @@
             </select>
           </div>
           <div>
+            <label>単元（任意）</label>
+            <input type="text" id="unit" placeholder="例：鎌倉時代 / 光合成" maxlength="60">
+          </div>
+          <div>
             <label>難易度/配点</label>
             <select id="difficulty">
               <option>5点</option>
@@ -115,7 +119,7 @@
               <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
             </div>
             <div class="flex" style="align-items:center">
-              <label class="pill"><input type="checkbox" id="includeHints"> ヒント（模範解答等）も生成に含める</label>
+              <label class="pill"><input type="checkbox" id="includeHints"> ヒント（解説・出題意図）も生成に含める</label>
             </div>
           </div>
         </details>
@@ -132,20 +136,13 @@
             <div class="flex" id="genTags" style="gap:6px;flex-wrap:wrap"></div>
             <div class="divider"></div>
             <div class="flex" style="gap:8px;align-items:center">
-              <button class="btn brand" id="btnUseForGrading">この問題で解答する</button>
+              <button class="btn brand cta" id="btnUseForGrading">この問題で解答する</button>
               <span class="small muted">押すと解答欄まで移動します</span>
               <label class="pill"><input type="checkbox" id="toggleHints"> ヒントを表示</label>
               <span id="dupNote" class="small"></span>
             </div>
             <div id="hintBox" class="hint" style="display:none;margin-top:10px">
-              <div style="margin-bottom:6px">
-                <button class="btn small" id="btnToggleGenModel" type="button">模範解答を表示</button>
-                <div id="genModelAnswerWrap" style="display:none;margin-top:4px">
-                  <span class="caps">模範解答</span>
-                  <div id="genModelAnswer" class="mono"></div>
-                </div>
-              </div>
-              <div class="divider"></div>
+              <div class="small muted" style="margin-bottom:6px">模範解答は採点後の結果エリアに表示されます。</div>
               <div style="margin:6px 0">
                 <button class="btn small" id="btnToggleGenExpl" type="button">解説を表示</button>
                 <div id="genExplanationWrap" style="display:none;margin-top:4px">
@@ -174,6 +171,7 @@
             <button class="btn" id="btnStockSearch">検索</button>
             <button class="btn" id="btnStockClearSearch">クリア</button>
             <button class="btn" id="btnStockRandom" title="条件に合うストックから1問ランダムに選びます">ランダム</button>
+            <label class="pill small"><input type="checkbox" id="stockFilterOnly" checked> 現在の条件のみ表示</label>
           </div>
           <div class="small muted" id="stockSearchInfo"></div>
 
@@ -191,8 +189,8 @@
 
         <!-- ✅ 追加：採点の観点（折りたたみ可能） -->
         <div class="qcard" id="rubricCard" style="margin-top:10px;">
-          <details class="rubric-details" open>
-            <summary>採点の観点（何を見られてるか）</summary>
+          <details class="rubric-details">
+            <summary>採点の観点（クリックで開く）</summary>
             <ul id="rubricList" style="margin:6px 0 0;padding-left:18px;line-height:1.7"></ul>
             <div id="rubricHint" class="small muted" style="margin-top:6px"></div>
           </details>
@@ -300,7 +298,7 @@
             </div>
 
             <div class="flex" style="gap:8px;margin-top:12px">
-              <button class="btn brand" id="btnRewrite">書き直して再提出</button>
+              <button class="btn brand" id="btnRewrite">書き直して再採点する</button>
             </div>
           </div>
 
@@ -314,7 +312,7 @@
             <div id="commentary" style="margin:6px 0 8px"></div>
 
             <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">満点例（10/10になりやすい例）</div>
+            <div class="small muted">模範解答（採点後に表示）</div>
             <div id="gradedModel" class="mono"></div>
             <div class="small muted" style="margin-top:8px">満点条件（必須要素）</div>
             <ul id="fullScoreCriteria" style="margin-top:4px"></ul>
@@ -352,7 +350,7 @@
 
           <!-- ✅ 追加：再挑戦（同じ問題で即リトライ） -->
           <div class="flex" style="gap:8px;margin-top:10px">
-            <button class="btn brand" id="btnRetrySame">解答をリセットして同じ問題を解き直す</button>
+            <button class="btn brand" id="btnRetrySame">解答を消して同じ問題を最初から解く</button>
           </div>
         </div>
       </section>
@@ -379,7 +377,7 @@
           <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
           <ul style="margin:0;padding-left:18px;line-height:1.8">
             <li><b>出題（記述問題）の自動生成</b>：社会/理科の記述問題を、入試・定期テスト想定で作れます。</li>
-            <li><b>採点（5点/10点/満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答を返します。</li>
+            <li><b>採点（5点/10点/満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答（採点後のみ）を返します。</li>
             <li><b>ストック保存</b>：生成した問題を最大10件まで保存し、あとで呼び出して使えます。</li>
             <li><b>エクスポート</b>：stocks / grading のデータを書き出し、バックアップや共有に使えます。</li>
           </ul>
@@ -402,12 +400,12 @@
           <div class="caps">① 出題の生成（左側）</div>
           <ol style="margin-top:8px;line-height:1.8">
             <li><strong>社会/理科</strong>タブを選びます（理科は学年を指定可能）。</li>
-            <li>分類・難易度・解答分量の目安を入力します。</li>
+            <li>分類・単元・難易度・解答分量の目安を入力します。</li>
             <li>必要なら「出題の方向性」「避ける話題」を入力します。</li>
             <li><strong>問題を自動生成</strong>を押すと、生成結果が表示されます。</li>
           </ol>
           <div class="small muted" style="margin-top:6px">
-            ヒントを見たい場合は「ヒントを表示」をONにすると、模範解答・解説・出題意図を確認できます。
+            ヒントを見たい場合は「ヒントを表示」をONにすると、解説・出題意図を確認できます（模範解答は採点後に表示）。
           </div>
         </div>
 
@@ -432,7 +430,7 @@
           <ol style="margin-top:8px;line-height:1.8">
             <li>左側で作成した問題を「この問題で解答する」で右側に送ります。</li>
             <li>生徒の解答を入力し、<strong>採点する</strong>を押します。</li>
-            <li>点数、講評、理由、模範解答が表示されます。</li>
+            <li>点数、講評、理由、模範解答（採点後のみ）が表示されます。</li>
             <li>採点の観点は折りたたみで確認できるので、<strong>何を見ているか</strong>が把握できます。</li>
             <li>やり直したいときは「解答をリセットして同じ問題を解き直す」で即リトライできます。</li>
           </ol>
@@ -448,7 +446,7 @@
           <ul style="margin-top:8px;padding-left:18px;line-height:1.8">
             <li>小テスト用に<strong>難易度=5点</strong>で10問生成 → ストックから当日使う。</li>
             <li>定期テスト対策で<strong>満点</strong>にして記述量を増やす。</li>
-            <li>「避ける話題」に既習単元を入れて、被りを防ぐ。</li>
+            <li>「単元」や「避ける話題」に既習内容を入れて、被りを防ぐ。</li>
           </ul>
         </div>
 
@@ -564,6 +562,18 @@
         list.appendChild(li);
       });
       hintEl.textContent = (hint || DEFAULT_RUBRIC_HINT);
+    }
+
+    function difficultyToMaxPoints(difficulty){
+      if(difficulty === '5点') return 5;
+      if(difficulty === '満点') return 100;
+      return 10;
+    }
+
+    function maxPointsToDifficulty(maxPoints){
+      if(Number(maxPoints) === 5) return '5点';
+      if(Number(maxPoints) === 100) return '満点';
+      return '10点';
     }
 
     function resetContinueScoreUI(){
@@ -831,7 +841,9 @@
         subject,
         category: $('#category').value,
         grade: subject==='理科' ? $('#grade').value : '',
+        unit: $('#unit').value || '',
         difficulty: $('#difficulty').value,
+        max_points: difficultyToMaxPoints($('#difficulty').value),
         genre_hint: $('#genreHint').value,
         avoid_topics: $('#avoidTopics').value,
         include_hints: $('#includeHints').checked,
@@ -868,15 +880,16 @@
     function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
-      $('#genModelAnswer').textContent = item.model_answer || '';
       $('#genExplanation').textContent = item.explanation || '';
       $('#genIntention').textContent = item.intention || '';
       const tags = item.tags || [];
       const meta = [];
       if(item.subject) meta.push(item.subject);
-      if(item.category) meta.push(item.category);
+      if(item.domain || item.category) meta.push(item.domain || item.category);
       if(item.grade) meta.push(item.grade);
-      if(item.difficulty) meta.push(item.difficulty);
+      if(item.unit) meta.push(`単元:${item.unit}`);
+      const maxPoints = item.max_points || difficultyToMaxPoints(item.difficulty || '');
+      if(maxPoints) meta.push(`配点:${maxPoints}点`);
       $('#genMeta').textContent = meta.join(' / ');
       const tagsBox = $('#genTags'); tagsBox.innerHTML='';
       tags.forEach(t=>{
@@ -885,7 +898,6 @@
       $('#dupNote').textContent = dupOf ? `（注）ストック内の類似: ${dupOf}` : '';
 
       $('#hintBox').style.display = $('#toggleHints').checked ? '' : 'none';
-      $('#genModelAnswerWrap').style.display = 'none';
       $('#genExplanationWrap').style.display = 'none';
       $('#genIntentionWrap').style.display = 'none';
     }
@@ -894,8 +906,12 @@
     function currentFilters(){
       return {
         subject,
+        domain: $('#category')?.value || '',
         category: $('#category')?.value || '',
         grade: subject === '理科' ? ($('#grade')?.value || '') : '',
+        unit: $('#unit')?.value || '',
+        difficulty: $('#difficulty')?.value || '10点',
+        max_points: difficultyToMaxPoints($('#difficulty')?.value || '10点'),
       };
     }
 
@@ -903,18 +919,22 @@
       const q = ($('#stockSearch')?.value || '').trim();
       const info = $('#stockSearchInfo');
       const filters = currentFilters();
+      const filterOnly = $('#stockFilterOnly')?.checked ?? true;
+      const queryFilters = filterOnly ? filters : {};
       try{
         let r;
         if(q){
-          const qs = buildQueryString({ q, limit: 50, offset: 0, ...filters });
+          const qs = buildQueryString({ q, limit: 50, offset: 0, ...queryFilters });
           r = await apiGet('/api/stock/search' + qs);
-          info.textContent = `検索中："${q}"（ヒット ${r.total ?? (r.items||[]).length} 件）`;
-          renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length });
+          info.textContent = filterOnly
+            ? `検索中："${q}"（条件一致 ${r.total ?? (r.items||[]).length} 件）`
+            : `検索中："${q}"（全体 ${r.total ?? (r.items||[]).length} 件）`;
+          renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length }, filters, filterOnly);
         }else{
-          const qs = buildQueryString(filters);
+          const qs = buildQueryString(queryFilters);
           r = await apiGet('/api/stock/list' + qs);
-          info.textContent = '';
-          renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count });
+          info.textContent = filterOnly ? '' : '全件表示中（上部に条件一致を優先表示）';
+          renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count }, filters, filterOnly);
         }
       }catch(e){
         console.error(e);
@@ -928,14 +948,35 @@
       }
     }
 
-    function renderStockList(items, meta){
+    function matchesFilters(it, filters){
+      if(filters.subject && it.subject !== filters.subject) return false;
+      if(filters.domain && (it.domain || it.category) !== filters.domain) return false;
+      if(filters.grade && it.grade !== filters.grade) return false;
+      if(filters.unit && it.unit !== filters.unit) return false;
+      if(filters.max_points && Number(it.max_points || 0) !== Number(filters.max_points)) return false;
+      return true;
+    }
+
+    function renderStockList(items, meta, filters = {}, filterOnly = true){
       const list = $('#stockList'); list.innerHTML='';
-      items.forEach(it=>{
+      const sorted = filterOnly ? items : [...items].sort((a,b)=>{
+        const am = matchesFilters(a, filters) ? 0 : 1;
+        const bm = matchesFilters(b, filters) ? 0 : 1;
+        return am - bm;
+      });
+      sorted.forEach(it=>{
         const div=document.createElement('div'); div.className='item';
 
         const topWrap=document.createElement('div');
         topWrap.className='small muted';
-        topWrap.textContent = `${(it.subject||'')}${it.category? ' / '+it.category:''}${it.grade? ' / '+it.grade:''} / ${it.difficulty||''}`;
+        const metaPieces = [
+          it.subject || '',
+          it.domain || it.category || '',
+          it.grade || '',
+          it.unit ? `単元:${it.unit}` : '',
+          `配点:${it.max_points || difficultyToMaxPoints(it.difficulty || '')}点`,
+        ].filter(Boolean);
+        topWrap.textContent = metaPieces.join(' / ');
 
         const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
 
@@ -977,7 +1018,8 @@
 
     async function stockRandom(){
       const q = ($('#stockSearch')?.value || '').trim();
-      const qs = buildQueryString({ q, ...currentFilters() });
+      const filterOnly = $('#stockFilterOnly')?.checked ?? true;
+      const qs = buildQueryString({ q, ...(filterOnly ? currentFilters() : {}) });
       try{
         const r = await apiGet('/api/stock/random' + qs);
         if(r && r.ok && r.item){
@@ -993,11 +1035,26 @@
 
     function useStock(it){
       currentItem = it;
+      if(it.subject && it.subject !== subject){
+        subject = it.subject;
+        updateSubjectTabs();
+      }
+      if(it.domain || it.category){
+        $('#category').value = it.domain || it.category;
+      }
+      if(subject === '理科' && it.grade){
+        $('#grade').value = it.grade;
+      }
       $('#currentQuestionText').textContent = it.question || '';
       $('#currentExpl').textContent = it.explanation || '';
       $('#currentIntn').textContent = it.intention || '';
-      if(it.difficulty){
-        $('#gradeDifficulty').value = it.difficulty;
+      const difficultyValue = it.difficulty || maxPointsToDifficulty(it.max_points);
+      if(difficultyValue){
+        $('#gradeDifficulty').value = difficultyValue;
+        $('#difficulty').value = difficultyValue;
+      }
+      if(it.unit){
+        $('#unit').value = it.unit;
       }
 
       $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
@@ -1007,7 +1064,11 @@
       $('#studentAnswer').value = '';
       clearGradeResultUI();
 
+      applyScienceConstraints();
+      refreshStock();
+
       document.querySelector('#studentAnswer')?.scrollIntoView({behavior:'smooth', block:'start'});
+      $('#studentAnswer')?.focus();
       toast('採点対象にセットしました');
     }
 
@@ -1182,7 +1243,8 @@
       const body = {
         question: currentItem.question,
         student_answer: $('#studentAnswer').value || '',
-        difficulty: $('#gradeDifficulty').value
+        difficulty: $('#gradeDifficulty').value,
+        max_points: difficultyToMaxPoints($('#gradeDifficulty').value),
       };
       if($('#includeModelForGrading').checked && currentItem.model_answer){
         body.model_answer = currentItem.model_answer;
@@ -1199,15 +1261,19 @@
           renderRubric(r.rubric, r.rubric_hint);
         }
 
+        clearGradeResultUI();
         $('#gradeResult').style.display='';
         renderResultHeader(r);
         resetContinueScoreUI();
 
         lastGradeResult = r;
         lastGradedAnswer = body.student_answer;
+        if(currentItem && r.model_answer){
+          currentItem.model_answer = r.model_answer;
+        }
 
         $('#commentary').textContent = r.commentary || '';
-        const modelText = (currentItem?.model_answer || r.full_score_example || r.model_answer || '').trim();
+        const modelText = (r.model_answer || '').trim();
         $('#gradedModel').textContent = modelText || '（未設定）';
 
         const criteria = Array.isArray(r.full_score_criteria) ? r.full_score_criteria : [];
@@ -1335,22 +1401,30 @@
 
     $('#grade').onchange = ()=>{ applyScienceConstraints(); refreshStock(); };
     $('#category').onchange = ()=> refreshStock();
+    $('#difficulty').onchange = ()=>{
+      $('#gradeDifficulty').value = $('#difficulty').value;
+      refreshStock();
+    };
+    $('#unit').onchange = ()=> refreshStock();
+    $('#stockFilterOnly').onchange = ()=> refreshStock();
+    $('#unit').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ refreshStock(); e.preventDefault(); }
+    });
+    $('#gradeDifficulty').onchange = ()=>{
+      $('#difficulty').value = $('#gradeDifficulty').value;
+      refreshStock();
+    };
 
     $('#btnGenerate').onclick = handleGenerate;
     $('#toggleHints').onchange = ()=> {
       const on = $('#toggleHints').checked;
       $('#hintBox').style.display = on ? '' : 'none';
       if(!on){
-        $('#genModelAnswerWrap').style.display = 'none';
         $('#genExplanationWrap').style.display = 'none';
         $('#genIntentionWrap').style.display = 'none';
       }
     };
 
-    $('#btnToggleGenModel').onclick = ()=>{
-      const w = $('#genModelAnswerWrap');
-      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
-    };
     $('#btnToggleGenExpl').onclick = ()=>{
       const w = $('#genExplanationWrap');
       w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
@@ -1392,7 +1466,7 @@
       $('#studentAnswer').value = '';
       clearGradeResultUI();
       $('#studentAnswer').focus();
-      toast('解答をリセットしました。書き直して再採点できます');
+      toast('解答を消しました。同じ問題を最初から解き直せます');
     };
 
     $('#btnRewrite').onclick = ()=>{
@@ -1402,7 +1476,7 @@
       }
       $('#studentAnswer').value = lastGradedAnswer;
       $('#studentAnswer').focus();
-      toast('前回の解答を読み直して書き直しましょう');
+      toast('前回の解答を読み直して書き直しましょう（再採点されます）');
     };
 
     document.querySelectorAll('#continueScoreButtons .chip').forEach(btn=>{

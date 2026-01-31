@@ -17,6 +17,7 @@
 
 import os
 import re
+import unicodedata
 import io
 import csv
 import json
@@ -157,12 +158,28 @@ def append_jsonl(path: Path, record: Dict[str, Any]):
 def normalize_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
+def normalize_for_match(s: str) -> str:
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"[、。,.．・!！?？:：;；（）()「」『』【】［］\[\]<>＜＞\"'’“”]", "", s)
+    return s.lower()
+
 def is_similar(a: str, b: str, threshold: Optional[float] = None) -> bool:
     a, b = normalize_text(a), normalize_text(b)
     if not a or not b:
         return False
     t = threshold if isinstance(threshold, (float, int)) else NOVELTY_THRESHOLD
     return SequenceMatcher(None, a, b).ratio() >= float(t)
+
+def is_high_match(a: str, b: str, threshold: float = 0.98) -> bool:
+    na, nb = normalize_for_match(a), normalize_for_match(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    return SequenceMatcher(None, na, nb).ratio() >= threshold
 
 def list_stock_files() -> List[Path]:
     return sorted([p for p in STOCK_DIR.glob("*.json")], key=lambda p: p.stat().st_mtime)
@@ -173,16 +190,36 @@ def load_stock_item(path: Path) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
+def enrich_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    enriched = dict(item)
+    question = enriched.get("question") or enriched.get("question_text") or ""
+    enriched["question"] = question
+    enriched["question_text"] = question
+    domain = enriched.get("domain") or enriched.get("category") or ""
+    enriched["domain"] = domain
+    enriched["category"] = enriched.get("category") or domain
+    enriched["unit"] = normalize_text(enriched.get("unit", ""))[:60]
+    difficulty = enriched.get("difficulty", "10点")
+    max_points = enriched.get("max_points")
+    try:
+        max_points_int = int(max_points)
+    except Exception:
+        max_points_int = difficulty_max_score(difficulty)
+    max_points_int = max(1, max_points_int)
+    enriched["max_points"] = max_points_int
+    return enriched
+
 def current_stocks() -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     for p in list_stock_files():
         obj = load_stock_item(p)
         if obj:
-            items.append(obj)
+            items.append(enrich_stock_item(obj))
     items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     return items
 
 def save_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    item = enrich_stock_item(item)
     sid = item.get("id") or uuid.uuid4().hex
     item["id"] = sid
     item["created_at"] = item.get("created_at", now_ms())
@@ -226,7 +263,13 @@ def recent_tags(limit: int = 8) -> List[str]:
                 return tags
     return tags
 
-def recent_questions(limit: int = 10, subject: Optional[str] = None, category: Optional[str] = None, grade: Optional[str] = None) -> List[str]:
+def recent_questions(
+    limit: int = 10,
+    subject: Optional[str] = None,
+    category: Optional[str] = None,
+    grade: Optional[str] = None,
+    unit: Optional[str] = None,
+) -> List[str]:
     questions: List[str] = []
     for it in current_stocks():
         if subject and it.get("subject") != subject:
@@ -234,6 +277,8 @@ def recent_questions(limit: int = 10, subject: Optional[str] = None, category: O
         if category and it.get("category") != category:
             continue
         if grade and it.get("grade") != grade:
+            continue
+        if unit and it.get("unit") != unit:
             continue
         q = normalize_text(it.get("question", ""))
         if q:
@@ -252,11 +297,11 @@ def ensure_openai() -> Optional[str]:
 def difficulty_max_score(difficulty: str) -> int:
     if difficulty == "5点":
         return 5
+    if difficulty == "満点":
+        return 100
     return 10
 
 def difficulty_label(difficulty: str) -> str:
-    if difficulty == "満点":
-        return "満点"
     return f"{difficulty_max_score(difficulty)}点"
 
 def parse_first_json_block(text: str) -> Dict[str, Any]:
@@ -502,6 +547,7 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     if difficulty not in ALLOWED_DIFFICULTY:
         difficulty = "10点"
 
+    unit = normalize_text(p.get("unit", ""))[:60]
     genre_hint = normalize_text(p.get("genre_hint", ""))[:120]
     avoid = normalize_text(p.get("avoid_topics", ""))[:120]
     length_hint = normalize_text(p.get("length_hint", "30〜80字程度"))[:40]
@@ -509,8 +555,11 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "subject": subject,
         "category": category,
+        "domain": category,
         "grade": grade,
         "difficulty": difficulty,
+        "max_points": difficulty_max_score(difficulty),
+        "unit": unit,
         "genre_hint": genre_hint,
         "avoid_topics": avoid,
         "length_hint": length_hint,
@@ -529,6 +578,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "student_answer": student_answer,
         "model_answer": model_answer,
         "difficulty": difficulty,
+        "max_points": difficulty_max_score(difficulty),
     }
 
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
@@ -557,6 +607,7 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     category = payload["category"]
     grade = payload["grade"]
     difficulty = payload["difficulty"]
+    unit = payload.get("unit", "")
     genre_hint = payload["genre_hint"]
     avoid = payload["avoid_topics"]
     length_hint = payload["length_hint"]
@@ -577,7 +628,8 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         f"教科: {subject}\n"
         f"分類: {category}\n"
         f"学年: {grade or '（理科以外は空で可）'}\n"
-        f"難易度/配点: {difficulty}\n"
+        f"難易度/配点: {difficulty_label(difficulty)}\n"
+        f"単元（任意）: {unit or '特になし'}\n"
         f"出題の方向性（任意）: {genre_hint or '特になし'}\n"
         f"避ける話題（任意）: {avoid or '特になし'}\n"
         f"解答分量の目安: {length_hint}\n\n"
@@ -614,7 +666,7 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         '"best_sentence":str,"short_comment":str,"rewrite_tip":str,'
         '"perfect_probability":int,"perfect_probability_note":str,'
         '"model_answer":str,"reasons":[str],'
-        '"full_score_criteria":[str],"full_score_example":str}。'
+        '"full_score_criteria":[str],"full_score_example":str,"model_answer":str}。'
         "rubric の各項目は0〜3の整数（結論の明確さ/理由の筋道/用語・表現の適切さ）。"
         "good_points は短い文を2つ、next_step は1つ。"
         "short_comment は1〜2行で簡潔に。"
@@ -622,7 +674,7 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "reasons は3〜6個、箇条書きの短文。"
         "full_score_criteria は満点に必要な要素を3つ程度、短く箇条書きで。"
         "full_score_example は満点になりやすい短い例文（参考解答と同等でも可）。"
-        "next_step は「具体例は1つでOK」を満たし、次の型で短く示す: 結論→理由→具体例1つ。"
+        "next_step は「結論→理由→具体例1つ」で、30〜80字の1文にする。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
@@ -825,18 +877,32 @@ def feedback():
 def stock_list():
     subject = request.args.get("subject", "")
     category = request.args.get("category", "")
+    domain = request.args.get("domain", "") or category
     grade = request.args.get("grade", "")
+    unit = request.args.get("unit", "")
+    difficulty = request.args.get("difficulty", "")
+    max_points = request.args.get("max_points", "")
+    try:
+        max_points_int = int(max_points) if max_points else None
+    except Exception:
+        max_points_int = None
 
     def match(it: Dict[str, Any]) -> bool:
         if subject and it.get("subject") != subject:
             return False
-        if category and it.get("category") != category:
+        if domain and it.get("domain") != domain:
             return False
         if grade and it.get("grade") != grade:
             return False
+        if unit and it.get("unit") != unit:
+            return False
+        if difficulty and it.get("difficulty") != difficulty:
+            return False
+        if max_points_int is not None and int(it.get("max_points") or 0) != max_points_int:
+            return False
         return True
 
-    items = [it for it in current_stocks() if match(it)]
+    items = [enrich_stock_item(it) for it in current_stocks() if match(it)]
     # ✅ 生徒にヒントを見せない（講師コードが無ければヒントを落とす）
     if not _is_teacher_request():
         items = [_strip_hints(dict(it)) for it in items]
@@ -847,8 +913,16 @@ def stock_search():
     q = normalize_text(request.args.get("q", ""))
     subject = request.args.get("subject", "")
     category = request.args.get("category", "")
+    domain = request.args.get("domain", "") or category
     grade = request.args.get("grade", "")
+    unit = request.args.get("unit", "")
+    difficulty = request.args.get("difficulty", "")
+    max_points = request.args.get("max_points", "")
     source = request.args.get("source", "")
+    try:
+        max_points_int = int(max_points) if max_points else None
+    except Exception:
+        max_points_int = None
     try:
         limit = max(1, min(100, int(request.args.get("limit", "20"))))
     except Exception:
@@ -861,9 +935,15 @@ def stock_search():
     def match(it: Dict[str, Any]) -> bool:
         if subject and it.get("subject") != subject:
             return False
-        if category and it.get("category") != category:
+        if domain and it.get("domain") != domain:
             return False
         if grade and it.get("grade") != grade:
+            return False
+        if unit and it.get("unit") != unit:
+            return False
+        if difficulty and it.get("difficulty") != difficulty:
+            return False
+        if max_points_int is not None and int(it.get("max_points") or 0) != max_points_int:
             return False
         if source and it.get("source") != source:
             return False
@@ -877,7 +957,7 @@ def stock_search():
                 return False
         return True
 
-    items = [it for it in current_stocks() if match(it)]
+    items = [enrich_stock_item(it) for it in current_stocks() if match(it)]
     total = len(items)
     sliced = items[offset: offset + limit]
 
@@ -891,18 +971,32 @@ def stock_random():
     q = request.args.get("q", "")
     subject = request.args.get("subject", "")
     category = request.args.get("category", "")
+    domain = request.args.get("domain", "") or category
     grade = request.args.get("grade", "")
+    unit = request.args.get("unit", "")
+    difficulty = request.args.get("difficulty", "")
+    max_points = request.args.get("max_points", "")
     source = request.args.get("source", "")
     exclude_ids = set([s for s in (request.args.get("exclude_ids", "") or "").split(",") if s])
+    try:
+        max_points_int = int(max_points) if max_points else None
+    except Exception:
+        max_points_int = None
 
     def match(it: Dict[str, Any]) -> bool:
         if it.get("id") in exclude_ids:
             return False
         if subject and it.get("subject") != subject:
             return False
-        if category and it.get("category") != category:
+        if domain and it.get("domain") != domain:
             return False
         if grade and it.get("grade") != grade:
+            return False
+        if unit and it.get("unit") != unit:
+            return False
+        if difficulty and it.get("difficulty") != difficulty:
+            return False
+        if max_points_int is not None and int(it.get("max_points") or 0) != max_points_int:
             return False
         if source and it.get("source") != source:
             return False
@@ -914,7 +1008,7 @@ def stock_random():
             return False
         return True
 
-    candidates = [it for it in current_stocks() if match(it)]
+    candidates = [enrich_stock_item(it) for it in current_stocks() if match(it)]
     if not candidates:
         return jsonify({"ok": False, "error": "no_candidates"}), 404
     item = random.choice(candidates)
@@ -941,9 +1035,11 @@ def stock_add():
     category = data.get("category", "")[:20]
     if subject and category and category not in ALLOWED_CAT_BY_SUBJECT[subject]:
         category = ""
+    domain = data.get("domain", "")[:20] or category
     grade = data.get("grade", "")[:10]
     if grade and grade not in ALLOWED_GRADES:
         grade = ""
+    unit = normalize_text(data.get("unit", ""))[:60]
 
     dup = find_duplicate_in_stocks(question, subject=subject, category=category, grade=grade)
     if dup:
@@ -952,10 +1048,14 @@ def stock_add():
     item = {
         "id": uuid.uuid4().hex,
         "question": question,
+        "question_text": question,
         "subject": subject,
         "category": category,
+        "domain": domain,
         "grade": grade,
+        "unit": unit,
         "difficulty": (data.get("difficulty", "10点") if data.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
+        "max_points": difficulty_max_score(data.get("difficulty", "10点")),
         "tags": (data.get("tags", []) if isinstance(data.get("tags", []), list) else [])[:10],
         "source": "manual",
         "created_at": now_ms(),
@@ -1034,7 +1134,9 @@ def stock_import():
 
         subject = raw.get("subject", "")
         category = raw.get("category", "")
+        domain = raw.get("domain", "") or category
         grade = raw.get("grade", "")
+        unit = normalize_text(raw.get("unit", ""))[:60]
 
         if subject not in ALLOWED_SUBJECTS:
             subject = ""
@@ -1051,10 +1153,14 @@ def stock_import():
         item = {
             "id": raw.get("id") or uuid.uuid4().hex,
             "question": q,
+            "question_text": q,
             "subject": subject,
             "category": category,
+            "domain": domain,
             "grade": grade,
+            "unit": unit,
             "difficulty": (raw.get("difficulty", "10点") if raw.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
+            "max_points": int(raw.get("max_points") or difficulty_max_score(raw.get("difficulty", "10点"))),
             "tags": [normalize_text(str(t))[:20] for t in (raw.get("tags") or [])][:10] if isinstance(raw.get("tags"), list) else [],
             "model_answer": normalize_text(raw.get("model_answer", ""))[:2000],
             "explanation": (raw.get("explanation", "") or "").strip(),
@@ -1109,7 +1215,13 @@ def generate_question():
 
     payload_in = request.get_json(force=True, silent=True) or {}
     payload = validate_generation_payload(payload_in)
-    recent_qs = recent_questions(limit=10, subject=payload["subject"], category=payload["category"], grade=payload["grade"])
+    recent_qs = recent_questions(
+        limit=10,
+        subject=payload["subject"],
+        category=payload["category"],
+        grade=payload["grade"],
+        unit=payload.get("unit"),
+    )
     question = ""
     model_answer = ""
     explanation = ""
@@ -1180,14 +1292,18 @@ def generate_question():
         "id": uuid.uuid4().hex,
         "source": "auto",
         "question": question,
+        "question_text": question,
         "model_answer": model_answer,
         "explanation": explanation,
         "intention": intention,
         "tags": tags,
         "subject": payload["subject"],
         "category": payload["category"],
+        "domain": payload["category"],
         "grade": payload["grade"],
+        "unit": payload.get("unit", ""),
         "difficulty": payload["difficulty"],
+        "max_points": payload["max_points"],
         "created_at": now_ms(),
     }
     saved = save_stock_item(item)
@@ -1254,11 +1370,12 @@ def grade_answer():
     good_points = good_points[:2]
 
     next_step = normalize_text(result.get("next_step", ""))[:160]
-    template_note = "達成条件: 具体例は1つでOK / 型: 結論→理由→具体例1つ（30〜80字の1文）"
-    if not next_step:
-        next_step = "結論→理由→具体例1つで1文にしてみよう"
-    if template_note not in next_step:
-        next_step = f"{next_step} / {template_note}"
+    template_note = "結論→理由→具体例1つで30〜80字の1文にしよう"
+    generic_hits = ("具体的", "詳しく", "詳細", "もっと", "より")
+    if not next_step or any(k in next_step for k in generic_hits):
+        next_step = template_note
+    elif template_note not in next_step:
+        next_step = f"{next_step}（{template_note}）"
 
     rubric_raw = result.get("rubric", {}) if isinstance(result.get("rubric", {}), dict) else {}
     def _rubric_score(key: str) -> int:
@@ -1278,12 +1395,12 @@ def grade_answer():
     rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
 
     max_score = difficulty_max_score(data["difficulty"])
-    score_label = difficulty_label(data["difficulty"])
+    score_label = f"{max_score}点"
 
     model_ans = (data.get("model_answer", "") or result.get("model_answer", "") or "").strip()
     full_score_example = (result.get("full_score_example", "") or model_ans).strip()
 
-    if model_ans and is_similar(data["student_answer"], model_ans, threshold=0.92):
+    if model_ans and is_high_match(data["student_answer"], model_ans, threshold=0.98):
         score_total_raw = 10
 
     score_total_scaled = int(round(score_total_raw * max_score / 10))
@@ -1415,8 +1532,9 @@ def export_stocks_csv():
     items = current_stocks()
     tmp = DATA / "stocks_export.csv"
     fields = [
-        "id", "subject", "category", "grade", "difficulty",
-        "question", "model_answer", "explanation", "intention",
+        "id", "subject", "domain", "category", "grade", "unit",
+        "difficulty", "max_points", "question", "question_text",
+        "model_answer", "explanation", "intention",
         "tags", "source", "created_at_iso"
     ]
     with tmp.open("w", newline="", encoding="utf-8-sig") as f:
@@ -1426,10 +1544,14 @@ def export_stocks_csv():
             writer.writerow({
                 "id": it.get("id", ""),
                 "subject": it.get("subject", ""),
+                "domain": it.get("domain", ""),
                 "category": it.get("category", ""),
                 "grade": it.get("grade", ""),
+                "unit": it.get("unit", ""),
                 "difficulty": it.get("difficulty", ""),
+                "max_points": it.get("max_points", ""),
                 "question": it.get("question", ""),
+                "question_text": it.get("question_text", ""),
                 "model_answer": it.get("model_answer", ""),
                 "explanation": it.get("explanation", ""),
                 "intention": it.get("intention", ""),
