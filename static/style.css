@@ -53,6 +53,28 @@ textarea{min-height:120px;resize:vertical}
 .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
 .caps{font-variant:all-small-caps;letter-spacing:.04em}
 .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
+.advanced{
+  margin-top:10px;
+  border:1px dashed var(--border);
+  border-radius:12px;
+  padding:10px 12px;
+  background:#fff;
+}
+.advanced summary{
+  cursor:pointer;
+  font-weight:600;
+  color:#111827;
+  list-style:none;
+}
+.advanced summary::-webkit-details-marker{display:none}
+.advanced[open]{background:#f9fafb}
+.rubric-details summary{
+  cursor:pointer;
+  font-weight:700;
+  color:#111827;
+  list-style:none;
+}
+.rubric-details summary::-webkit-details-marker{display:none}
 
 /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
 :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }

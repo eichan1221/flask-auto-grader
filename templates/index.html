@@ -97,22 +97,30 @@
               <option>満点</option>
             </select>
           </div>
-          <div>
-            <label>解答分量の目安</label>
-            <input type="text" id="lengthHint" value="30〜80字程度" maxlength="40">
-          </div>
-          <div>
-            <label>出題の方向性（任意）</label>
-            <input type="text" id="genreHint" placeholder="制度/文化/時代背景 など" maxlength="120">
-          </div>
-          <div>
-            <label>避ける話題（任意）</label>
-            <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
-          </div>
         </div>
 
+        <details class="advanced" id="advancedSettings">
+          <summary>詳細設定（Advanced）</summary>
+          <div class="grid-2" style="margin-top:10px">
+            <div>
+              <label>解答分量の目安</label>
+              <input type="text" id="lengthHint" value="30〜80字程度" maxlength="40">
+            </div>
+            <div>
+              <label>出題の方向性（任意）</label>
+              <input type="text" id="genreHint" placeholder="制度/文化/時代背景 など" maxlength="120">
+            </div>
+            <div>
+              <label>避ける話題（任意）</label>
+              <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
+            </div>
+            <div class="flex" style="align-items:center">
+              <label class="pill"><input type="checkbox" id="includeHints"> ヒント（模範解答等）も生成に含める</label>
+            </div>
+          </div>
+        </details>
+
         <div class="flex" style="margin-top:8px">
-          <label class="pill"><input type="checkbox" id="includeHints"> ヒント（模範解答等）も生成に含める</label>
           <button class="btn brand" id="btnGenerate">問題を自動生成</button>
         </div>
 
@@ -124,7 +132,8 @@
             <div class="flex" id="genTags" style="gap:6px;flex-wrap:wrap"></div>
             <div class="divider"></div>
             <div class="flex" style="gap:8px;align-items:center">
-              <button class="btn" id="btnUseForGrading">この問題で採点へ</button>
+              <button class="btn brand" id="btnUseForGrading">この問題で解答する</button>
+              <span class="small muted">押すと解答欄まで移動します</span>
               <label class="pill"><input type="checkbox" id="toggleHints"> ヒントを表示</label>
               <span id="dupNote" class="small"></span>
             </div>
@@ -174,18 +183,19 @@
       </section>
 
       <!-- 右：採点 -->
-      <section class="card">
+      <section class="card" id="gradingSection">
         <div class="toolbar">
           <h2>② 採点</h2>
           <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
         </div>
 
-        <!-- ✅ 追加：採点の観点を固定表示（常に見える） -->
-        <div class="qcard" id="rubricCard"
-             style="margin-top:10px; position: sticky; top: 82px; z-index: 2;">
-          <div class="small muted" style="font-weight:700">採点の観点（何を見られてるか）</div>
-          <ul id="rubricList" style="margin:6px 0 0;padding-left:18px;line-height:1.7"></ul>
-          <div id="rubricHint" class="small muted" style="margin-top:6px"></div>
+        <!-- ✅ 追加：採点の観点（折りたたみ可能） -->
+        <div class="qcard" id="rubricCard" style="margin-top:10px;">
+          <details class="rubric-details" open>
+            <summary>採点の観点（何を見られてるか）</summary>
+            <ul id="rubricList" style="margin:6px 0 0;padding-left:18px;line-height:1.7"></ul>
+            <div id="rubricHint" class="small muted" style="margin-top:6px"></div>
+          </details>
         </div>
 
         <div class="qcard" style="margin-top:10px">
@@ -196,14 +206,6 @@
             <label class="pill"><input type="checkbox" id="showCurrentHints"> ヒントを表示</label>
           </div>
           <div id="currentHintBox" class="hint" style="display:none;margin-top:8px">
-            <div style="margin-bottom:6px">
-              <button class="btn small" id="btnToggleCurModel" type="button">模範解答を表示</button>
-              <div id="currentModelWrap" style="display:none;margin-top:4px">
-                <span class="caps">模範解答</span>
-                <div id="currentModel" class="mono"></div>
-              </div>
-            </div>
-            <div class="divider"></div>
             <div style="margin:6px 0">
               <button class="btn small" id="btnToggleCurExpl" type="button">解説を表示</button>
               <div id="currentExplWrap" style="display:none;margin-top:4px">
@@ -224,7 +226,7 @@
 
         <div class="flex-col" style="margin-top:10px">
           <label>あなたの解答</label>
-          <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安）" maxlength="2000"></textarea>
+          <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安 / 具体例は1つでOK）" maxlength="2000"></textarea>
         </div>
         <div class="flex" style="margin-top:10px">
           <select id="gradeDifficulty">
@@ -234,6 +236,9 @@
           </select>
           <button class="btn brand" id="btnGrade">採点する</button>
           <button class="btn" id="btnClearAnswer">クリア</button>
+        </div>
+        <div class="small muted" style="margin-top:6px">
+          解答欄を書き換えて「採点する」を押せば、同じ問題で何度でも再採点できます。
         </div>
 
         <div id="gradeResult" style="margin-top:12px;display:none">
@@ -305,8 +310,24 @@
             <!-- ✅ 満点確率表示 -->
             <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
 
+            <div class="small muted" style="margin-top:10px">講評</div>
             <div id="commentary" style="margin:6px 0 8px"></div>
 
+            <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">満点例（10/10になりやすい例）</div>
+            <div id="gradedModel" class="mono"></div>
+            <div class="small muted" style="margin-top:8px">満点条件（必須要素）</div>
+            <ul id="fullScoreCriteria" style="margin-top:4px"></ul>
+
+            <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">解説</div>
+            <div id="gradedExplanation" style="margin-top:4px"></div>
+
+            <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">出題意図</div>
+            <div id="gradedIntention" style="margin-top:4px"></div>
+
+            <div class="divider" style="margin:12px 0"></div>
             <div class="small muted">理由</div>
             <ul id="reasons" style="margin-top:4px"></ul>
 
@@ -327,15 +348,11 @@
               <div class="small muted">練習メニュー（すぐできる）</div>
               <ul id="practiceMenu" style="margin-top:4px"></ul>
             </div>
-
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">参考：模範解答</div>
-            <div id="gradedModel" class="mono"></div>
           </div>
 
           <!-- ✅ 追加：再挑戦（同じ問題で即リトライ） -->
           <div class="flex" style="gap:8px;margin-top:10px">
-            <button class="btn brand" id="btnRetrySame">同じ問題でもう一回</button>
+            <button class="btn brand" id="btnRetrySame">解答をリセットして同じ問題を解き直す</button>
           </div>
         </div>
       </section>
@@ -362,7 +379,7 @@
           <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
           <ul style="margin:0;padding-left:18px;line-height:1.8">
             <li><b>出題（記述問題）の自動生成</b>：社会/理科の記述問題を、入試・定期テスト想定で作れます。</li>
-            <li><b>採点（10点満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答を返します。</li>
+            <li><b>採点（5点/10点/満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答を返します。</li>
             <li><b>ストック保存</b>：生成した問題を最大10件まで保存し、あとで呼び出して使えます。</li>
             <li><b>エクスポート</b>：stocks / grading のデータを書き出し、バックアップや共有に使えます。</li>
           </ul>
@@ -413,11 +430,11 @@
         <div>
           <div class="caps">③ 採点の流れ（右側）</div>
           <ol style="margin-top:8px;line-height:1.8">
-            <li>左側で作成した問題を「この問題で採点へ」で右側に送ります。</li>
+            <li>左側で作成した問題を「この問題で解答する」で右側に送ります。</li>
             <li>生徒の解答を入力し、<strong>採点する</strong>を押します。</li>
             <li>点数、講評、理由、模範解答が表示されます。</li>
-            <li>採点の観点は右上に固定表示されるので、<strong>何を見ているか</strong>が確認できます。</li>
-            <li>やり直したいときは「同じ問題でもう一回」で即リトライできます。</li>
+            <li>採点の観点は折りたたみで確認できるので、<strong>何を見ているか</strong>が把握できます。</li>
+            <li>やり直したいときは「解答をリセットして同じ問題を解き直す」で即リトライできます。</li>
           </ol>
           <div class="small muted" style="margin-top:6px">
             採点結果は「🧾 grading.jsonl」で書き出しできます。
@@ -577,6 +594,9 @@
       const perfectProbLine = $('#perfectProbLine'); if(perfectProbLine) perfectProbLine.textContent = '';
       const commentary = $('#commentary'); if(commentary) commentary.textContent = '';
       const gradedModel = $('#gradedModel'); if(gradedModel) gradedModel.textContent = '';
+      const fullScoreCriteria = $('#fullScoreCriteria'); if(fullScoreCriteria) fullScoreCriteria.innerHTML = '';
+      const gradedExplanation = $('#gradedExplanation'); if(gradedExplanation) gradedExplanation.textContent = '';
+      const gradedIntention = $('#gradedIntention'); if(gradedIntention) gradedIntention.textContent = '';
       const reasons = $('#reasons'); if(reasons) reasons.innerHTML = '';
 
       const weakWrap = $('#weakTagsWrap'); if(weakWrap) weakWrap.style.display = 'none';
@@ -803,6 +823,7 @@
         $('#gradeBox').style.display='';
         applyScienceConstraints();
       }
+      refreshStock();
     }
 
     async function handleGenerate(){
@@ -870,18 +891,28 @@
     }
 
     // ---- ストック一覧（list / search 対応） ----
+    function currentFilters(){
+      return {
+        subject,
+        category: $('#category')?.value || '',
+        grade: subject === '理科' ? ($('#grade')?.value || '') : '',
+      };
+    }
+
     async function refreshStock(){
       const q = ($('#stockSearch')?.value || '').trim();
       const info = $('#stockSearchInfo');
+      const filters = currentFilters();
       try{
         let r;
         if(q){
-          const qs = buildQueryString({ q, limit: 50, offset: 0 });
+          const qs = buildQueryString({ q, limit: 50, offset: 0, ...filters });
           r = await apiGet('/api/stock/search' + qs);
           info.textContent = `検索中："${q}"（ヒット ${r.total ?? (r.items||[]).length} 件）`;
           renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length });
         }else{
-          r = await apiGet('/api/stock/list');
+          const qs = buildQueryString(filters);
+          r = await apiGet('/api/stock/list' + qs);
           info.textContent = '';
           renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count });
         }
@@ -946,7 +977,7 @@
 
     async function stockRandom(){
       const q = ($('#stockSearch')?.value || '').trim();
-      const qs = buildQueryString({ q });
+      const qs = buildQueryString({ q, ...currentFilters() });
       try{
         const r = await apiGet('/api/stock/random' + qs);
         if(r && r.ok && r.item){
@@ -963,25 +994,27 @@
     function useStock(it){
       currentItem = it;
       $('#currentQuestionText').textContent = it.question || '';
-      $('#currentModel').textContent = it.model_answer || '';
       $('#currentExpl').textContent = it.explanation || '';
       $('#currentIntn').textContent = it.intention || '';
+      if(it.difficulty){
+        $('#gradeDifficulty').value = it.difficulty;
+      }
 
       $('#currentHintBox').style.display = $('#showCurrentHints').checked ? '' : 'none';
-      $('#currentModelWrap').style.display = 'none';
       $('#currentExplWrap').style.display = 'none';
       $('#currentIntnWrap').style.display = 'none';
 
       $('#studentAnswer').value = '';
       clearGradeResultUI();
 
-      window.scrollTo({top:0,behavior:'smooth'});
+      document.querySelector('#studentAnswer')?.scrollIntoView({behavior:'smooth', block:'start'});
       toast('採点対象にセットしました');
     }
 
     function renderResultHeader(r){
       const score = r?.score_total ?? r?.score ?? 0;
-      $('#scoreLine').textContent = `10点中${score}点`;
+      const label = r?.score_label || `${r?.max_score ?? 10}点`;
+      $('#scoreLine').textContent = `${label}中${score}点`;
       $('#shortComment').textContent = r?.short_comment || '';
 
       const gp = $('#goodPoints'); gp.innerHTML = '';
@@ -1174,7 +1207,22 @@
         lastGradedAnswer = body.student_answer;
 
         $('#commentary').textContent = r.commentary || '';
-        $('#gradedModel').textContent = r.model_answer || '';
+        const modelText = (currentItem?.model_answer || r.full_score_example || r.model_answer || '').trim();
+        $('#gradedModel').textContent = modelText || '（未設定）';
+
+        const criteria = Array.isArray(r.full_score_criteria) ? r.full_score_criteria : [];
+        const criteriaList = $('#fullScoreCriteria');
+        if(criteriaList){
+          criteriaList.innerHTML = '';
+          (criteria.length ? criteria : ['結論が明確', '理由が1つ以上ある', '重要語句が入っている']).forEach(c=>{
+            const li = document.createElement('li');
+            li.textContent = c;
+            criteriaList.appendChild(li);
+          });
+        }
+
+        $('#gradedExplanation').textContent = (currentItem?.explanation || '').trim() || '（未設定）';
+        $('#gradedIntention').textContent = (currentItem?.intention || '').trim() || '（未設定）';
 
         const ul = $('#reasons'); ul.innerHTML='';
         (r.reasons||[]).forEach(s=>{
@@ -1285,7 +1333,8 @@
       if(t && (e.key === 'Enter' || e.key === ' ')){ t.click(); e.preventDefault(); }
     });
 
-    $('#grade').onchange = applyScienceConstraints;
+    $('#grade').onchange = ()=>{ applyScienceConstraints(); refreshStock(); };
+    $('#category').onchange = ()=> refreshStock();
 
     $('#btnGenerate').onclick = handleGenerate;
     $('#toggleHints').onchange = ()=> {
@@ -1321,16 +1370,11 @@
       const on = $('#showCurrentHints').checked;
       $('#currentHintBox').style.display = on ? '' : 'none';
       if(!on){
-        $('#currentModelWrap').style.display = 'none';
         $('#currentExplWrap').style.display = 'none';
         $('#currentIntnWrap').style.display = 'none';
       }
     };
 
-    $('#btnToggleCurModel').onclick = ()=>{
-      const w = $('#currentModelWrap');
-      w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
-    };
     $('#btnToggleCurExpl').onclick = ()=>{
       const w = $('#currentExplWrap');
       w.style.display = (w.style.display === 'none' || !w.style.display) ? '' : 'none';
@@ -1348,7 +1392,7 @@
       $('#studentAnswer').value = '';
       clearGradeResultUI();
       $('#studentAnswer').focus();
-      toast('同じ問題で再挑戦できます');
+      toast('解答をリセットしました。書き直して再採点できます');
     };
 
     $('#btnRewrite').onclick = ()=>{
