@@ -31,9 +31,12 @@ textarea{min-height:120px;resize:vertical}
 .btn.ghost{background:transparent}
 .btn.warn{background:var(--warn);border-color:var(--warn);color:#fff}
 .btn.err{background:var(--err);border-color:var(--err);color:#fff}
+.btn.small{padding:6px 12px;font-size:12px}
 .tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:#374151;background:#fff}
 .toolbar{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:900px){.grid-3{grid-template-columns:1fr}}
 @media (max-width:700px){.grid-2{grid-template-columns:1fr}}
 .pill{
   display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#fff
@@ -41,6 +44,7 @@ textarea{min-height:120px;resize:vertical}
 .pill.small{padding:4px 8px;font-size:12px}
 .small{font-size:12px;color:var(--muted)}
 .qcard{background:#fff;border:1px dashed var(--border);border-radius:12px;padding:12px}
+.qcard.mini{background:#fdf7ff}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
 .hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
 .toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
@@ -51,7 +55,7 @@ textarea{min-height:120px;resize:vertical}
 .divider{height:1px;background:var(--border);margin:8px 0}
 .tab{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer}
 .tab.active{background:var(--brand);border-color:var(--brand);color:#fff}
-.list{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto}
+.list{display:flex;flex-direction:column;gap:10px;max-height:380px;overflow:auto}
 .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
 .caps{font-variant:all-small-caps;letter-spacing:.04em}
 .kbd{border:1px solid var(--border);padding:1px 6px;border-radius:6px;background:#fff;font-size:12px}
@@ -158,3 +162,34 @@ textarea{min-height:120px;resize:vertical}
 }
 .feedback-fab:hover{background:var(--brand-strong)}
 .feedback-form textarea{min-height:180px}
+
+/* 文字数メーター */
+.char-meter{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}
+.char-meter.in-range{color:var(--ok)}
+.char-meter.too-short{color:var(--warn)}
+.char-meter.too-long{color:var(--err)}
+
+/* アシスト */
+.assist-panel{background:linear-gradient(180deg,#fff,#f8f3ff)}
+.assist-field.missing input{border-color:var(--warn);box-shadow:0 0 0 2px rgba(245,158,11,0.15)}
+.assist-actions{display:flex;gap:8px;align-items:center;margin:10px 0}
+.assist-head{margin-top:10px}
+
+/* 学習履歴 */
+.history-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.history-chip{border:1px solid var(--border);border-radius:999px;padding:4px 8px;font-size:12px;background:#fff}
+.history-stats{display:grid;gap:6px;margin-top:8px;font-size:12px;color:var(--muted)}
+
+/* 満点条件チェック */
+.criteria-check{list-style:none;padding-left:0;margin:0}
+.criteria-check li{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
+.criteria-check li .check{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--border);font-size:11px}
+.criteria-check li.met .check{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.4);color:var(--ok)}
+.criteria-check li.unmet .check{background:#fff;border-color:rgba(245,158,11,0.4);color:var(--warn)}
+
+/* 結果タブ */
+.result-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.tab-btn{border:1px solid var(--border);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.tab-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
