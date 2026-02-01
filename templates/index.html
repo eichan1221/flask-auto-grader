@@ -162,21 +162,14 @@
           </div>
         </div>
 
-        <div style="margin-top:16px">
-          <h3>ストック（最新10件）</h3>
-
-          <!-- ✅ 追加（レイアウトは維持）：検索・ランダム -->
-          <div class="flex" style="gap:8px;margin:8px 0 6px">
-            <input type="text" id="stockSearch" placeholder="ストック検索（キーワード）" style="flex:1;min-width:220px" maxlength="120">
-            <button class="btn" id="btnStockSearch">検索</button>
-            <button class="btn" id="btnStockClearSearch">クリア</button>
-            <button class="btn" id="btnStockRandom" title="条件に合うストックから1問ランダムに選びます">ランダム</button>
-            <label class="pill small"><input type="checkbox" id="stockFilterOnly" checked> 現在の条件のみ表示</label>
+        <div class="qcard" style="margin-top:16px">
+          <div class="flex" style="justify-content:space-between;align-items:center">
+            <div>
+              <div class="small muted">ストック（最新10件）</div>
+              <div class="small" id="stockSummary">ストックはモーダルで一覧・検索できます。</div>
+            </div>
+            <button class="btn brand" id="btnOpenStock">ストックを開く</button>
           </div>
-          <div class="small muted" id="stockSearchInfo"></div>
-
-          <div class="list" id="stockList"></div>
-          <div class="small muted" id="stockCount"></div>
         </div>
       </section>
 
@@ -222,9 +215,45 @@
           </div>
         </div>
 
+        <div class="assist-head">
+          <div class="flex" style="gap:8px;align-items:center">
+            <span class="pill"><input type="checkbox" id="assistToggle"> アシストON（結論/理由/具体例の骨組み）</span>
+            <span class="small muted">書けないときはONにして骨組みを作成</span>
+          </div>
+        </div>
+
+        <div id="assistPanel" class="qcard assist-panel" style="display:none;margin-top:10px">
+          <div class="grid-3">
+            <div class="assist-field" data-field="conclusion">
+              <label>結論（主張）</label>
+              <input type="text" id="assistConclusion" placeholder="例：鎌倉幕府ができた理由" maxlength="60">
+            </div>
+            <div class="assist-field" data-field="reason">
+              <label>理由（1つでOK）</label>
+              <input type="text" id="assistReason" placeholder="例：武士が力を持つようになったから" maxlength="60">
+            </div>
+            <div class="assist-field" data-field="example">
+              <label>具体例（地名/数字/出来事）</label>
+              <input type="text" id="assistExample" placeholder="例：源頼朝が鎌倉に幕府を開いた" maxlength="60">
+            </div>
+          </div>
+          <div class="assist-actions">
+            <div class="small muted">スターター例：</div>
+            <div class="flex" id="assistStarters"></div>
+          </div>
+          <div class="flex" style="justify-content:space-between;align-items:center">
+            <div class="small muted" id="assistStatus"></div>
+            <button class="btn brand" id="btnApplyAssist">文章を合成して解答欄に反映</button>
+          </div>
+        </div>
+
         <div class="flex-col" style="margin-top:10px">
           <label>あなたの解答</label>
           <textarea id="studentAnswer" placeholder="ここに解答を記入（30〜80字目安 / 具体例は1つでOK）" maxlength="2000"></textarea>
+          <div class="char-meter" id="charMeter">
+            <span id="charCount">0字</span>
+            <span class="small muted" id="charHint">目安: 30〜80字</span>
+          </div>
         </div>
         <div class="flex" style="margin-top:10px">
           <select id="gradeDifficulty">
@@ -237,6 +266,16 @@
         </div>
         <div class="small muted" style="margin-top:6px">
           解答欄を書き換えて「採点する」を押せば、同じ問題で何度でも再採点できます。
+        </div>
+
+        <div class="qcard mini" id="historyCard" style="margin-top:12px">
+          <div class="small muted">直近10回の学習ログ</div>
+          <div class="history-row" id="scoreHistory"></div>
+          <div class="history-stats">
+            <div>平均点（10点換算）: <span id="avgScore">-</span></div>
+            <div>伸び幅（最新-初回）: <span id="growthScore">-</span></div>
+            <div>つまずきやすい観点: <span id="weakSummary">-</span></div>
+          </div>
         </div>
 
         <div id="gradeResult" style="margin-top:12px;display:none">
@@ -283,6 +322,11 @@
             </div>
 
             <div class="divider" style="margin:12px 0"></div>
+            <div class="small muted">満点条件（必須要素）</div>
+            <ul id="fullScoreCriteriaCheck" class="criteria-check" style="margin-top:6px"></ul>
+            <div class="small muted" id="modelCopyNote" style="margin-top:6px">模範解答をそのまま書けば、原則として選択配点の満点になります。</div>
+
+            <div class="divider" style="margin:12px 0"></div>
             <div class="small muted">ルーブリック（毎回同じ尺度）</div>
             <div class="rubric-grid" id="rubricScores"></div>
 
@@ -304,30 +348,38 @@
 
           <h3>採点結果</h3>
           <div class="qcard">
+            <div class="result-tabs" id="resultTabs">
+              <button class="tab-btn active" data-tab="tabCommentary">講評</button>
+              <button class="tab-btn" data-tab="tabModel">模範解答</button>
+              <button class="tab-btn" data-tab="tabExplanation">解説・出題意図</button>
+              <button class="tab-btn" data-tab="tabReasons">理由</button>
+            </div>
 
             <!-- ✅ 満点確率表示 -->
             <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
 
-            <div class="small muted" style="margin-top:10px">講評</div>
-            <div id="commentary" style="margin:6px 0 8px"></div>
+            <div class="tab-panel active" id="tabCommentary">
+              <div class="small muted" style="margin-top:10px">講評</div>
+              <div id="commentary" style="margin:6px 0 8px"></div>
+            </div>
 
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">模範解答（採点後に表示）</div>
-            <div id="gradedModel" class="mono"></div>
-            <div class="small muted" style="margin-top:8px">満点条件（必須要素）</div>
-            <ul id="fullScoreCriteria" style="margin-top:4px"></ul>
+            <div class="tab-panel" id="tabModel">
+              <div class="small muted" style="margin-top:10px">模範解答（表示と採点参照は同一）</div>
+              <div id="gradedModel" class="mono"></div>
+            </div>
 
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">解説</div>
-            <div id="gradedExplanation" style="margin-top:4px"></div>
+            <div class="tab-panel" id="tabExplanation">
+              <div class="small muted" style="margin-top:10px">解説</div>
+              <div id="gradedExplanation" style="margin-top:4px"></div>
+              <div class="divider" style="margin:12px 0"></div>
+              <div class="small muted">出題意図</div>
+              <div id="gradedIntention" style="margin-top:4px"></div>
+            </div>
 
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">出題意図</div>
-            <div id="gradedIntention" style="margin-top:4px"></div>
-
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">理由</div>
-            <ul id="reasons" style="margin-top:4px"></ul>
+            <div class="tab-panel" id="tabReasons">
+              <div class="small muted" style="margin-top:10px">理由</div>
+              <ul id="reasons" style="margin-top:4px"></ul>
+            </div>
 
             <!-- ✅ 追加：次の一手（行動） -->
             <div class="divider" style="margin:12px 0"></div>
@@ -338,7 +390,7 @@
             </div>
 
             <div id="nextStepsWrap" style="display:none;margin-top:10px">
-              <div class="small muted">次の一手（1〜3個・短く）</div>
+              <div class="small muted">次の一手（達成条件つき）</div>
               <ul id="nextSteps" style="margin-top:4px"></ul>
             </div>
 
@@ -415,7 +467,7 @@
           <div class="caps">② ストックの使い方（左側下部）</div>
           <ol style="margin-top:8px;line-height:1.8">
             <li>生成した問題は自動的にストックに追加されます（最新10件）。</li>
-            <li>検索ボックスでキーワード検索、<strong>ランダム</strong>で条件に合う問題を1問選べます。</li>
+            <li>ストックを開くと<strong>検索/フィルタ/ソート</strong>が使えます。</li>
             <li>使いたい問題をクリックすると、採点側にセットされます。</li>
           </ol>
           <div class="small muted" style="margin-top:6px">
@@ -461,6 +513,75 @@
           </ul>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================
+       ✅ ストック モーダル
+       ========================= -->
+  <div class="modal" id="stockModal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="stockModalTitle">
+      <div class="panelHeader">
+        <div>
+          <h2 class="panelTitle" id="stockModalTitle">ストック一覧（フィルタ・検索）</h2>
+          <div class="small muted">条件を絞って、使いたい問題を選択してください。</div>
+        </div>
+        <div class="flex" style="gap:8px">
+          <button class="btn" id="btnStockClose" aria-label="ストックを閉じる">閉じる</button>
+        </div>
+      </div>
+      <div class="panelBody">
+        <div class="grid-3">
+          <div>
+            <label>教科</label>
+            <select id="stockSubject">
+              <option>社会</option>
+              <option>理科</option>
+            </select>
+          </div>
+          <div>
+            <label>分類</label>
+            <select id="stockCategory"></select>
+          </div>
+          <div id="stockGradeBox" style="display:none">
+            <label>学年（理科のみ）</label>
+            <select id="stockGrade">
+              <option>中1</option>
+              <option>中2</option>
+              <option selected>中3</option>
+            </select>
+          </div>
+          <div>
+            <label>単元</label>
+            <input type="text" id="stockUnit" placeholder="例：鎌倉時代" maxlength="60">
+          </div>
+          <div>
+            <label>配点</label>
+            <select id="stockDifficulty">
+              <option>5点</option>
+              <option selected>10点</option>
+              <option>満点</option>
+            </select>
+          </div>
+          <div>
+            <label>並び順</label>
+            <select id="stockOrder">
+              <option value="new">新しい順</option>
+              <option value="old">古い順</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex" style="gap:8px;margin-top:10px">
+          <input type="text" id="stockSearch" placeholder="キーワード検索" style="flex:1;min-width:220px" maxlength="120">
+          <button class="btn" id="btnStockSearch">検索</button>
+          <button class="btn" id="btnStockClearSearch">クリア</button>
+          <button class="btn" id="btnStockRandom" title="条件に合うストックから1問ランダムに選びます">ランダム</button>
+        </div>
+        <div class="small muted" id="stockSearchInfo" style="margin-top:6px"></div>
+
+        <div class="list" id="stockModalList" style="margin-top:10px"></div>
+        <div class="small muted" id="stockModalCount"></div>
       </div>
     </div>
   </div>
@@ -538,6 +659,13 @@
     ];
     const DEFAULT_RUBRIC_HINT = '迷ったら「原因→結果」「重要語句」「比較の軸」を意識すると点が伸びやすいです。';
 
+    const ASSIST_STARTERS = [
+      '理由は〜である。',
+      '具体例として〜がある。',
+      '結論は〜である。',
+      'つまり、〜ということだ。'
+    ];
+
     function escapeHtml(s){
       return String(s ?? '')
         .replaceAll('&','&amp;')
@@ -604,7 +732,7 @@
       const perfectProbLine = $('#perfectProbLine'); if(perfectProbLine) perfectProbLine.textContent = '';
       const commentary = $('#commentary'); if(commentary) commentary.textContent = '';
       const gradedModel = $('#gradedModel'); if(gradedModel) gradedModel.textContent = '';
-      const fullScoreCriteria = $('#fullScoreCriteria'); if(fullScoreCriteria) fullScoreCriteria.innerHTML = '';
+      const fullScoreCriteria = $('#fullScoreCriteriaCheck'); if(fullScoreCriteria) fullScoreCriteria.innerHTML = '';
       const gradedExplanation = $('#gradedExplanation'); if(gradedExplanation) gradedExplanation.textContent = '';
       const gradedIntention = $('#gradedIntention'); if(gradedIntention) gradedIntention.textContent = '';
       const reasons = $('#reasons'); if(reasons) reasons.innerHTML = '';
@@ -619,6 +747,15 @@
       const pm = $('#practiceMenu'); if(pm) pm.innerHTML = '';
 
       resetContinueScoreUI();
+    }
+
+    function setActiveTab(tabId){
+      document.querySelectorAll('.tab-btn').forEach(btn=>{
+        btn.classList.toggle('active', btn.dataset.tab === tabId);
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel=>{
+        panel.classList.toggle('active', panel.id === tabId);
+      });
     }
 
     // ---- 共通Fetch ----
@@ -717,12 +854,40 @@
       return qs ? `?${qs}` : '';
     }
 
+    function getLengthRange(){
+      const hint = ($('#lengthHint')?.value || '30〜80字').toString();
+      const m = hint.match(/(\d+)\D+(\d+)/);
+      if(m){
+        return {min: Number(m[1]), max: Number(m[2])};
+      }
+      return {min: 30, max: 80};
+    }
+
+    function updateCharCount(){
+      const len = ($('#studentAnswer')?.value || '').length;
+      const range = getLengthRange();
+      const count = $('#charCount');
+      const hint = $('#charHint');
+      if(count) count.textContent = `${len}字`;
+      if(hint) hint.textContent = `目安: ${range.min}〜${range.max}字`;
+      const meter = $('#charMeter');
+      if(meter){
+        meter.classList.toggle('in-range', len >= range.min && len <= range.max);
+        meter.classList.toggle('too-short', len < range.min);
+        meter.classList.toggle('too-long', len > range.max);
+      }
+    }
+
     // ---- UI状態 ----
     let subject = '社会';
     let currentItem = null;
     let generatedRaw = null;
     let lastGradeResult = null;
     let lastGradedAnswer = '';
+    let lastGradeQuestion = '';
+    let rewriteCount = 0;
+    let scoreHistory = [];
+    let rubricHistory = [];
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -753,6 +918,36 @@
       });
     }
 
+    function applyStockScienceConstraints(){
+      const subjectVal = $('#stockSubject').value;
+      if(subjectVal !== '理科') return;
+      const g = $('#stockGrade').value;
+      const cat = $('#stockCategory');
+      [...cat.options].forEach(opt=>{
+        if(opt.textContent==='天体'){
+          opt.disabled = (g !== '中3');
+          if(opt.disabled && cat.value==='天体'){
+            cat.value = '地学';
+          }
+        }
+      });
+    }
+
+    function setStockCategories(subjectVal){
+      const cat = $('#stockCategory');
+      cat.innerHTML = '';
+      const options = subjectVal === '社会'
+        ? ['地理','歴史']
+        : ['生物','化学','地学','物理','天体'];
+      options.forEach(x=>{
+        const o = document.createElement('option');
+        o.textContent = x;
+        cat.appendChild(o);
+      });
+      $('#stockGradeBox').style.display = subjectVal === '理科' ? '' : 'none';
+      applyStockScienceConstraints();
+    }
+
     // ---- 利用状況バッジ ----
     async function refreshUsage(){
       const badge = $('#usageBadge');
@@ -774,6 +969,18 @@
       }catch(e){}
     }
 
+    async function refreshStockSummary(){
+      const summary = $('#stockSummary');
+      if(!summary) return;
+      try{
+        const r = await apiGet('/api/stock/list?limit=1');
+        const total = r.total ?? r.count ?? 0;
+        summary.textContent = `ストック合計 ${total} 件`;
+      }catch(e){
+        summary.textContent = 'ストックはモーダルで一覧・検索できます。';
+      }
+    }
+
     // ---- 使い方モーダル ----
     function openHowto(){
       const m = $('#howtoModal');
@@ -788,12 +995,32 @@
       setTimeout(()=>{ $('#btnHowto').focus(); }, 0);
     }
 
+    function openStockModal(){
+      const modal = $('#stockModal');
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden','false');
+      syncStockFiltersFromMain();
+      refreshStockModal();
+      setTimeout(()=>{ $('#stockSearch')?.focus(); }, 0);
+    }
+
+    function closeStockModal(){
+      const modal = $('#stockModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ $('#btnOpenStock')?.focus(); }, 0);
+    }
+
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
       updateFeedbackCount();
+      updateCharCount();
 
       renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
+      renderAssistStarters();
+      loadHistory();
+      updateHistoryUI();
 
       try{
         const m = await apiGet('/api/model');
@@ -807,11 +1034,11 @@
         }
       }catch(e){}
 
-      await refreshStock();
       updateSubjectTabs();
       applyScienceConstraints();
       $('#settingsCard').style.display = 'none';
       refreshUsage();
+      refreshStockSummary();
     }
 
     // ---- 生成UIロジック ----
@@ -833,7 +1060,6 @@
         $('#gradeBox').style.display='';
         applyScienceConstraints();
       }
-      refreshStock();
     }
 
     async function handleGenerate(){
@@ -861,7 +1087,7 @@
           currentItem = item;
         }
         renderGenerated(item, res.duplicate_of);
-        await refreshStock();
+        refreshStockSummary();
         await refreshUsage();
         toast('問題を生成しました');
       }catch(e){
@@ -902,69 +1128,59 @@
       $('#genIntentionWrap').style.display = 'none';
     }
 
-    // ---- ストック一覧（list / search 対応） ----
-    function currentFilters(){
+    function syncStockFiltersFromMain(){
+      $('#stockSubject').value = subject;
+      setStockCategories(subject);
+      $('#stockCategory').value = $('#category').value;
+      $('#stockGrade').value = subject === '理科' ? $('#grade').value : '中3';
+      $('#stockUnit').value = $('#unit').value || '';
+      $('#stockDifficulty').value = $('#difficulty').value || '10点';
+    }
+
+    function stockFilters(){
       return {
-        subject,
-        domain: $('#category')?.value || '',
-        category: $('#category')?.value || '',
-        grade: subject === '理科' ? ($('#grade')?.value || '') : '',
-        unit: $('#unit')?.value || '',
-        difficulty: $('#difficulty')?.value || '10点',
-        max_points: difficultyToMaxPoints($('#difficulty')?.value || '10点'),
+        subject: $('#stockSubject')?.value || '',
+        domain: $('#stockCategory')?.value || '',
+        category: $('#stockCategory')?.value || '',
+        grade: $('#stockSubject')?.value === '理科' ? ($('#stockGrade')?.value || '') : '',
+        unit: $('#stockUnit')?.value || '',
+        difficulty: $('#stockDifficulty')?.value || '10点',
+        max_points: difficultyToMaxPoints($('#stockDifficulty')?.value || '10点'),
+        order: $('#stockOrder')?.value || 'new',
       };
     }
 
-    async function refreshStock(){
+    async function refreshStockModal(){
       const q = ($('#stockSearch')?.value || '').trim();
       const info = $('#stockSearchInfo');
-      const filters = currentFilters();
-      const filterOnly = $('#stockFilterOnly')?.checked ?? true;
-      const queryFilters = filterOnly ? filters : {};
+      const filters = stockFilters();
       try{
         let r;
         if(q){
-          const qs = buildQueryString({ q, limit: 50, offset: 0, ...queryFilters });
+          const qs = buildQueryString({ q, limit: 50, offset: 0, ...filters });
           r = await apiGet('/api/stock/search' + qs);
-          info.textContent = filterOnly
-            ? `検索中："${q}"（条件一致 ${r.total ?? (r.items||[]).length} 件）`
-            : `検索中："${q}"（全体 ${r.total ?? (r.items||[]).length} 件）`;
-          renderStockList(r.items || [], { count: (r.items||[]).length, limit: r.limit ?? 50, total: r.total ?? (r.items||[]).length }, filters, filterOnly);
+          info.textContent = `検索中："${q}"（${r.total ?? (r.items||[]).length} 件）`;
         }else{
-          const qs = buildQueryString(queryFilters);
+          const qs = buildQueryString({ limit: 50, offset: 0, ...filters });
           r = await apiGet('/api/stock/list' + qs);
-          info.textContent = filterOnly ? '' : '全件表示中（上部に条件一致を優先表示）';
-          renderStockList(r.items || [], { count: r.count, limit: r.limit, total: r.count }, filters, filterOnly);
+          info.textContent = '条件一致のストックを表示中';
         }
+        renderStockList(r.items || [], r);
       }catch(e){
         console.error(e);
-        const list = $('#stockList'); list.innerHTML='';
+        const list = $('#stockModalList'); list.innerHTML='';
         const errDiv = document.createElement('div');
         errDiv.className = 'small danger';
         errDiv.textContent = '取得に失敗: ' + e.message;
         list.appendChild(errDiv);
-        $('#stockCount').textContent = '';
+        $('#stockModalCount').textContent = '';
         if(info) info.textContent = '';
       }
     }
 
-    function matchesFilters(it, filters){
-      if(filters.subject && it.subject !== filters.subject) return false;
-      if(filters.domain && (it.domain || it.category) !== filters.domain) return false;
-      if(filters.grade && it.grade !== filters.grade) return false;
-      if(filters.unit && it.unit !== filters.unit) return false;
-      if(filters.max_points && Number(it.max_points || 0) !== Number(filters.max_points)) return false;
-      return true;
-    }
-
-    function renderStockList(items, meta, filters = {}, filterOnly = true){
-      const list = $('#stockList'); list.innerHTML='';
-      const sorted = filterOnly ? items : [...items].sort((a,b)=>{
-        const am = matchesFilters(a, filters) ? 0 : 1;
-        const bm = matchesFilters(b, filters) ? 0 : 1;
-        return am - bm;
-      });
-      sorted.forEach(it=>{
+    function renderStockList(items, meta){
+      const list = $('#stockModalList'); list.innerHTML='';
+      items.forEach(it=>{
         const div=document.createElement('div'); div.className='item';
 
         const topWrap=document.createElement('div');
@@ -975,14 +1191,15 @@
           it.grade || '',
           it.unit ? `単元:${it.unit}` : '',
           `配点:${it.max_points || difficultyToMaxPoints(it.difficulty || '')}点`,
+          it.created_at ? `作成:${new Date(it.created_at).toLocaleDateString()}` : ''
         ].filter(Boolean);
         topWrap.textContent = metaPieces.join(' / ');
 
         const q=document.createElement('div'); q.style.margin='6px 0'; q.textContent = it.question || '';
 
         const actions=document.createElement('div'); actions.className='flex';
-        const useBtn=document.createElement('button'); useBtn.className='btn'; useBtn.textContent='この問題を使う';
-        useBtn.onclick=()=>{ useStock(it); };
+        const useBtn=document.createElement('button'); useBtn.className='btn brand'; useBtn.textContent='この問題を使う';
+        useBtn.onclick=()=>{ useStock(it); closeStockModal(); };
         actions.appendChild(useBtn);
 
         if(cfg.accessCode){
@@ -995,14 +1212,9 @@
         list.appendChild(div);
       });
 
-      const count = meta?.count ?? items.length;
-      const limit = meta?.limit ?? '';
-      const total = meta?.total ?? count;
-      if(limit !== ''){
-        $('#stockCount').textContent = `表示: ${count} 件 / 全体 ${total} 件（上限 ${limit}）`;
-      }else{
-        $('#stockCount').textContent = `表示: ${count} 件 / 全体 ${total} 件`;
-      }
+      const count = meta?.items?.length ?? items.length;
+      const total = meta?.total ?? meta?.count ?? count;
+      $('#stockModalCount').textContent = `表示: ${count} 件 / 全体 ${total} 件`;
     }
 
     async function deleteStock(id){
@@ -1010,7 +1222,8 @@
       try{
         await apiPost('/api/stock/delete', {id});
         toast('削除しました');
-        await refreshStock();
+        await refreshStockModal();
+        refreshStockSummary();
       }catch(e){
         toast('削除に失敗: ' + e.message, false);
       }
@@ -1018,12 +1231,12 @@
 
     async function stockRandom(){
       const q = ($('#stockSearch')?.value || '').trim();
-      const filterOnly = $('#stockFilterOnly')?.checked ?? true;
-      const qs = buildQueryString({ q, ...(filterOnly ? currentFilters() : {}) });
+      const qs = buildQueryString({ q, ...stockFilters() });
       try{
         const r = await apiGet('/api/stock/random' + qs);
         if(r && r.ok && r.item){
           useStock(r.item);
+          closeStockModal();
           toast('ランダムで1問選びました');
         }else{
           toast('候補が見つかりませんでした', false);
@@ -1062,10 +1275,12 @@
       $('#currentIntnWrap').style.display = 'none';
 
       $('#studentAnswer').value = '';
+      updateCharCount();
       clearGradeResultUI();
+      rewriteCount = 0;
+      lastGradeQuestion = '';
 
       applyScienceConstraints();
-      refreshStock();
 
       document.querySelector('#studentAnswer')?.scrollIntoView({behavior:'smooth', block:'start'});
       $('#studentAnswer')?.focus();
@@ -1086,6 +1301,18 @@
       });
 
       $('#nextStep').textContent = r?.next_step || '';
+
+      const criteriaList = $('#fullScoreCriteriaCheck');
+      criteriaList.innerHTML = '';
+      const criteria = Array.isArray(r?.full_score_checks) && r.full_score_checks.length
+        ? r.full_score_checks
+        : (r?.full_score_criteria || []).map(c=>({text:c, met:false}));
+      criteria.forEach(c=>{
+        const li = document.createElement('li');
+        li.className = c.met ? 'met' : 'unmet';
+        li.innerHTML = `<span class="check">${c.met ? '✔' : '○'}</span>${escapeHtml(c.text || '')}`;
+        criteriaList.appendChild(li);
+      });
 
       const rubricScores = $('#rubricScores');
       rubricScores.innerHTML = '';
@@ -1142,6 +1369,159 @@
       }
     }
 
+    function updateHistoryUI(){
+      const historyEl = $('#scoreHistory');
+      if(!historyEl) return;
+      historyEl.innerHTML = '';
+      if(!scoreHistory.length){
+        historyEl.textContent = 'まだ履歴がありません';
+        return;
+      }
+      scoreHistory.forEach((h)=>{
+        const chip = document.createElement('span');
+        chip.className = 'history-chip';
+        chip.textContent = `${h.score}/${h.max}`;
+        historyEl.appendChild(chip);
+      });
+
+      const normalized = scoreHistory.map(h=> (h.score / h.max) * 10);
+      const avg = normalized.reduce((a,b)=>a+b,0) / normalized.length;
+      const growth = normalized[normalized.length - 1] - normalized[0];
+      $('#avgScore').textContent = `${avg.toFixed(1)} / 10`;
+      const sign = growth >= 0 ? '+' : '';
+      $('#growthScore').textContent = `${sign}${growth.toFixed(1)} / 10`;
+
+      const weak = computeWeakSummary();
+      $('#weakSummary').textContent = weak || '-';
+    }
+
+    function computeWeakSummary(){
+      if(!rubricHistory.length) return '';
+      const sums = {conclusion:0, logic:0, wording:0};
+      rubricHistory.forEach(r=>{
+        sums.conclusion += r.conclusion || 0;
+        sums.logic += r.logic || 0;
+        sums.wording += r.wording || 0;
+      });
+      const avg = {
+        conclusion: sums.conclusion / rubricHistory.length,
+        logic: sums.logic / rubricHistory.length,
+        wording: sums.wording / rubricHistory.length
+      };
+      const entries = [
+        {key:'conclusion', label:'結論の明確さ'},
+        {key:'logic', label:'理由の筋道'},
+        {key:'wording', label:'用語・表現'}
+      ];
+      entries.sort((a,b)=>avg[a.key]-avg[b.key]);
+      return `${entries[0].label}が低め`;
+    }
+
+    function loadHistory(){
+      try{
+        scoreHistory = JSON.parse(localStorage.getItem('scoreHistory') || '[]');
+      }catch(e){
+        scoreHistory = [];
+      }
+      try{
+        rubricHistory = JSON.parse(localStorage.getItem('rubricHistory') || '[]');
+      }catch(e){
+        rubricHistory = [];
+      }
+    }
+
+    function saveHistory(){
+      localStorage.setItem('scoreHistory', JSON.stringify(scoreHistory));
+      localStorage.setItem('rubricHistory', JSON.stringify(rubricHistory));
+    }
+
+    function addHistoryEntry(score, max, rubric){
+      scoreHistory.push({score, max, ts: Date.now()});
+      scoreHistory = scoreHistory.slice(-10);
+      if(rubric){
+        rubricHistory.push(rubric);
+        rubricHistory = rubricHistory.slice(-10);
+      }
+      saveHistory();
+      updateHistoryUI();
+    }
+
+    function renderAssistStarters(){
+      const wrap = $('#assistStarters');
+      if(!wrap) return;
+      wrap.innerHTML = '';
+      ASSIST_STARTERS.forEach(t=>{
+        const btn = document.createElement('button');
+        btn.className = 'btn small';
+        btn.type = 'button';
+        btn.textContent = t;
+        btn.onclick = ()=>{
+          const textarea = $('#studentAnswer');
+          if(textarea){
+            textarea.value = `${textarea.value} ${t}`.trim();
+            updateCharCount();
+            textarea.focus();
+          }
+        };
+        wrap.appendChild(btn);
+      });
+    }
+
+    function applyAssistHighlight(missing){
+      document.querySelectorAll('.assist-field').forEach(field=>{
+        const key = field.dataset.field;
+        field.classList.toggle('missing', missing.includes(key));
+      });
+    }
+
+    function highlightAssistFromCriteria(checks){
+      if(!Array.isArray(checks)) return;
+      const missing = [];
+      checks.forEach(c=>{
+        if(!c || c.met) return;
+        const text = c.text || '';
+        if(text.includes('結論')) missing.push('conclusion');
+        if(text.includes('理由') || text.includes('因果')) missing.push('reason');
+        if(text.includes('具体例') || text.includes('事例')) missing.push('example');
+      });
+      applyAssistHighlight([...new Set(missing)]);
+    }
+
+    function composeAssistText(){
+      const conclusion = ($('#assistConclusion')?.value || '').trim();
+      const reason = ($('#assistReason')?.value || '').trim();
+      const example = ($('#assistExample')?.value || '').trim();
+
+      const missing = [];
+      if(!conclusion) missing.push('conclusion');
+      if(!reason) missing.push('reason');
+      if(!example) missing.push('example');
+      applyAssistHighlight(missing);
+
+      let text = '';
+      if(conclusion && reason && example){
+        text = `${conclusion}の理由は${reason}で、具体例として${example}がある。`;
+      }else if(conclusion && reason){
+        text = `${conclusion}の理由は${reason}である。`;
+      }else if(conclusion){
+        text = `${conclusion}。`;
+      }
+      return {text, missing};
+    }
+
+    function updateAssistStatus(){
+      const {text, missing} = composeAssistText();
+      const status = $('#assistStatus');
+      if(status){
+        if(missing.length){
+          status.textContent = `未入力: ${missing.join(' / ')}`;
+        }else{
+          const len = text.length;
+          status.textContent = `合成後の文字数: ${len}字`;
+        }
+      }
+    }
+
     async function sendContinueScore(score, btn){
       const status = $('#continueScoreStatus');
       const role = localStorage.getItem('feedbackRole') || 'unknown';
@@ -1157,6 +1537,10 @@
         const scoreTotal = lastGradeResult.score_total ?? lastGradeResult.score;
         if(scoreTotal !== undefined) context.score_total = scoreTotal;
         if(lastGradeResult.rubric) context.rubric = lastGradeResult.rubric;
+        context.assist_on = lastGradeResult.assist_on ?? $('#assistToggle')?.checked ?? false;
+        context.rewrite_count = lastGradeResult.rewrite_count ?? rewriteCount;
+        context.selected_full_score = lastGradeResult.selected_full_score ?? $('#gradeDifficulty')?.value;
+        context.last10_scores = scoreHistory.map(s=>s.score);
       }
       if(lastGradedAnswer) context.answer_length = lastGradedAnswer.length;
 
@@ -1240,11 +1624,20 @@
       if(!currentItem || !currentItem.question){
         toast('先に問題を選ぶか生成してください', false); return;
       }
+      if(lastGradeQuestion === currentItem.question){
+        rewriteCount += 1;
+      }else{
+        rewriteCount = 0;
+      }
       const body = {
         question: currentItem.question,
         student_answer: $('#studentAnswer').value || '',
         difficulty: $('#gradeDifficulty').value,
         max_points: difficultyToMaxPoints($('#gradeDifficulty').value),
+        assist_on: $('#assistToggle').checked,
+        rewrite_count: rewriteCount,
+        selected_full_score: $('#gradeDifficulty').value,
+        last10_scores: scoreHistory.map(s=>s.score)
       };
       if($('#includeModelForGrading').checked && currentItem.model_answer){
         body.model_answer = currentItem.model_answer;
@@ -1263,11 +1656,14 @@
 
         clearGradeResultUI();
         $('#gradeResult').style.display='';
+        setActiveTab('tabCommentary');
         renderResultHeader(r);
         resetContinueScoreUI();
+        highlightAssistFromCriteria(r.full_score_checks || []);
 
         lastGradeResult = r;
         lastGradedAnswer = body.student_answer;
+        lastGradeQuestion = currentItem.question;
         if(currentItem && r.model_answer){
           currentItem.model_answer = r.model_answer;
         }
@@ -1275,17 +1671,6 @@
         $('#commentary').textContent = r.commentary || '';
         const modelText = (r.model_answer || '').trim();
         $('#gradedModel').textContent = modelText || '（未設定）';
-
-        const criteria = Array.isArray(r.full_score_criteria) ? r.full_score_criteria : [];
-        const criteriaList = $('#fullScoreCriteria');
-        if(criteriaList){
-          criteriaList.innerHTML = '';
-          (criteria.length ? criteria : ['結論が明確', '理由が1つ以上ある', '重要語句が入っている']).forEach(c=>{
-            const li = document.createElement('li');
-            li.textContent = c;
-            criteriaList.appendChild(li);
-          });
-        }
 
         $('#gradedExplanation').textContent = (currentItem?.explanation || '').trim() || '（未設定）';
         $('#gradedIntention').textContent = (currentItem?.intention || '').trim() || '（未設定）';
@@ -1359,6 +1744,8 @@
           }
         }
 
+        addHistoryEntry(r.score_total ?? r.score ?? 0, r.max_score ?? difficultyToMaxPoints(body.difficulty), r.rubric);
+        updateAssistStatus();
         await refreshUsage();
         toast('採点しました');
       }catch(e){
@@ -1399,23 +1786,25 @@
       if(t && (e.key === 'Enter' || e.key === ' ')){ t.click(); e.preventDefault(); }
     });
 
-    $('#grade').onchange = ()=>{ applyScienceConstraints(); refreshStock(); };
-    $('#category').onchange = ()=> refreshStock();
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.tab-btn');
+      if(btn){
+        setActiveTab(btn.dataset.tab);
+      }
+    });
+
+    $('#grade').onchange = ()=>{ applyScienceConstraints(); };
+    $('#category').onchange = ()=> {};
     $('#difficulty').onchange = ()=>{
       $('#gradeDifficulty').value = $('#difficulty').value;
-      refreshStock();
     };
-    $('#unit').onchange = ()=> refreshStock();
-    $('#stockFilterOnly').onchange = ()=> refreshStock();
-    $('#unit').addEventListener('keydown', (e)=>{
-      if(e.key === 'Enter'){ refreshStock(); e.preventDefault(); }
-    });
+    $('#unit').onchange = ()=> {};
     $('#gradeDifficulty').onchange = ()=>{
       $('#difficulty').value = $('#gradeDifficulty').value;
-      refreshStock();
     };
 
     $('#btnGenerate').onclick = handleGenerate;
+    $('#lengthHint').addEventListener('input', updateCharCount);
     $('#toggleHints').onchange = ()=> {
       const on = $('#toggleHints').checked;
       $('#hintBox').style.display = on ? '' : 'none';
@@ -1460,10 +1849,11 @@
 
     $('#btnGrade').onclick = handleGrade;
 
-    $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; clearGradeResultUI(); };
+    $('#btnClearAnswer').onclick = ()=>{ $('#studentAnswer').value=''; updateCharCount(); clearGradeResultUI(); };
 
     $('#btnRetrySame').onclick = ()=>{
       $('#studentAnswer').value = '';
+      updateCharCount();
       clearGradeResultUI();
       $('#studentAnswer').focus();
       toast('解答を消しました。同じ問題を最初から解き直せます');
@@ -1475,6 +1865,7 @@
         return;
       }
       $('#studentAnswer').value = lastGradedAnswer;
+      updateCharCount();
       $('#studentAnswer').focus();
       toast('前回の解答を読み直して書き直しましょう（再採点されます）');
     };
@@ -1497,17 +1888,29 @@
     $('#btnSaveSettings').onclick = ()=> { saveSettings(); boot(); };
     $('#btnReload').onclick = boot;
 
-    $('#btnStockSearch').onclick = ()=> refreshStock();
-    $('#btnStockClearSearch').onclick = ()=>{ $('#stockSearch').value=''; refreshStock(); };
-    $('#btnStockRandom').onclick = stockRandom;
-    $('#stockSearch').addEventListener('keydown', (e)=>{
-      if(e.key === 'Enter'){ refreshStock(); e.preventDefault(); }
-    });
-
     $('#btnHowto').onclick = openHowto;
     $('#btnHowtoClose').onclick = closeHowto;
     $('#howtoModal').addEventListener('click', (e)=>{
       if(e.target === e.currentTarget) closeHowto();
+    });
+
+    $('#btnOpenStock').onclick = openStockModal;
+    $('#btnStockClose').onclick = closeStockModal;
+    $('#stockModal').addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget) closeStockModal();
+    });
+
+    $('#stockSubject').onchange = ()=>{ setStockCategories($('#stockSubject').value); refreshStockModal(); };
+    $('#stockCategory').onchange = ()=> refreshStockModal();
+    $('#stockGrade').onchange = ()=>{ applyStockScienceConstraints(); refreshStockModal(); };
+    $('#stockUnit').onchange = ()=> refreshStockModal();
+    $('#stockDifficulty').onchange = ()=> refreshStockModal();
+    $('#stockOrder').onchange = ()=> refreshStockModal();
+    $('#btnStockSearch').onclick = ()=> refreshStockModal();
+    $('#btnStockClearSearch').onclick = ()=>{ $('#stockSearch').value=''; refreshStockModal(); };
+    $('#btnStockRandom').onclick = stockRandom;
+    $('#stockSearch').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ refreshStockModal(); e.preventDefault(); }
     });
 
     // ✅ フィードバックモーダル開閉
@@ -1519,12 +1922,40 @@
     $('#feedbackForm').addEventListener('submit', handleFeedbackSubmit);
     $('#feedbackMessage').addEventListener('input', updateFeedbackCount);
 
+    $('#assistToggle').onchange = ()=>{
+      const on = $('#assistToggle').checked;
+      $('#assistPanel').style.display = on ? '' : 'none';
+      updateAssistStatus();
+    };
+
+    $('#assistConclusion').addEventListener('input', updateAssistStatus);
+    $('#assistReason').addEventListener('input', updateAssistStatus);
+    $('#assistExample').addEventListener('input', updateAssistStatus);
+
+    $('#btnApplyAssist').onclick = ()=>{
+      const {text, missing} = composeAssistText();
+      if(missing.length){
+        toast('まずは結論・理由・具体例を埋めましょう', false);
+        return;
+      }
+      $('#studentAnswer').value = text;
+      updateCharCount();
+      $('#studentAnswer').focus();
+      toast('解答欄に反映しました');
+    };
+
+    $('#studentAnswer').addEventListener('input', ()=>{
+      updateCharCount();
+    });
+
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
       const fb = $('#feedbackModal');
+      const stock = $('#stockModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
         if(fb && fb.classList.contains('show')) closeFeedback();
+        if(stock && stock.classList.contains('show')) closeStockModal();
       }
     });
 

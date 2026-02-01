@@ -263,6 +263,67 @@ def recent_tags(limit: int = 8) -> List[str]:
                 return tags
     return tags
 
+STOPWORDS = {
+    "それ", "これ", "ため", "もの", "こと", "よう", "など", "として", "する",
+    "必要", "重要", "的", "について", "なぜ", "どの", "どのよう", "どんな",
+    "理由", "原因", "結果", "影響", "比較", "説明", "用語", "資料", "グラフ",
+    "社会", "理科", "地理", "歴史", "生物", "化学", "地学", "物理", "天体",
+}
+
+ANGLE_OPTIONS = [
+    {"key": "cause", "label": "原因・理由", "hint": "原因/理由/背景を問う観点"},
+    {"key": "effect", "label": "結果・影響", "hint": "結果/影響/メリット・デメリットを問う観点"},
+    {"key": "compare", "label": "比較", "hint": "AとBの違い/共通点を問う観点"},
+    {"key": "define", "label": "用語説明", "hint": "用語の説明/しくみを問う観点"},
+    {"key": "evidence", "label": "根拠", "hint": "根拠や具体例を挙げる観点"},
+]
+
+def extract_keywords(text: str, limit: int = 12) -> List[str]:
+    tokens = re.findall(r"[一-龥ぁ-んァ-ンA-Za-z0-9]+", text or "")
+    out: List[str] = []
+    for token in tokens:
+        t = normalize_text(token)
+        if len(t) < 2:
+            continue
+        if t in STOPWORDS:
+            continue
+        if t not in out:
+            out.append(t)
+        if len(out) >= limit:
+            break
+    return out
+
+def keyword_overlap_score(a: str, b: str) -> float:
+    ka = set(extract_keywords(a, limit=24))
+    kb = set(extract_keywords(b, limit=24))
+    if not ka or not kb:
+        return 0.0
+    inter = ka.intersection(kb)
+    union = ka.union(kb)
+    return len(inter) / max(len(union), 1)
+
+def detect_angle(text: str) -> Optional[str]:
+    t = text or ""
+    if re.search(r"比較|違い|共通", t):
+        return "compare"
+    if re.search(r"原因|理由|背景|なぜ", t):
+        return "cause"
+    if re.search(r"結果|影響|メリット|デメリット", t):
+        return "effect"
+    if re.search(r"仕組み|しくみ|定義|説明|用語", t):
+        return "define"
+    if re.search(r"根拠|資料|データ|事例", t):
+        return "evidence"
+    return None
+
+def pick_next_angle(recent_qs: List[str]) -> Dict[str, str]:
+    recent_angles = [detect_angle(q) for q in recent_qs[:2]]
+    recent_angles = [a for a in recent_angles if a]
+    for opt in ANGLE_OPTIONS:
+        if opt["key"] not in recent_angles:
+            return opt
+    return random.choice(ANGLE_OPTIONS)
+
 def recent_questions(
     limit: int = 10,
     subject: Optional[str] = None,
@@ -573,12 +634,27 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     difficulty = p.get("difficulty", "10点")
     if difficulty not in ALLOWED_DIFFICULTY:
         difficulty = "10点"
+    assist_on = bool(p.get("assist_on", False))
+    try:
+        rewrite_count = int(p.get("rewrite_count", 0))
+    except Exception:
+        rewrite_count = 0
+    rewrite_count = max(0, min(50, rewrite_count))
+    selected_full_score = normalize_text(p.get("selected_full_score", difficulty))[:10]
+    last10_scores = p.get("last10_scores", [])
+    if not isinstance(last10_scores, list):
+        last10_scores = []
+    last10_scores = [int(x) for x in last10_scores[:10] if isinstance(x, (int, float, str)) and str(x).isdigit()]
     return {
         "question": question,
         "student_answer": student_answer,
         "model_answer": model_answer,
         "difficulty": difficulty,
         "max_points": difficulty_max_score(difficulty),
+        "assist_on": assist_on,
+        "rewrite_count": rewrite_count,
+        "selected_full_score": selected_full_score,
+        "last10_scores": last10_scores,
     }
 
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
@@ -616,6 +692,17 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     if recent:
         extra_avoid = "、".join(recent[:8])
         avoid = f"{avoid}（直近の重複回避候補: {extra_avoid}）" if avoid else f"直近の重複回避候補: {extra_avoid}"
+    recent_qs = recent_questions(limit=5, subject=subject, category=category, grade=grade, unit=unit)
+    recent_keywords: List[str] = []
+    for q in recent_qs:
+        for kw in extract_keywords(q, limit=8):
+            if kw not in recent_keywords:
+                recent_keywords.append(kw)
+        if len(recent_keywords) >= 10:
+            break
+    if recent_keywords:
+        avoid = f"{avoid}（最近のキーワード: {'・'.join(recent_keywords[:10])}）" if avoid else f"最近のキーワード: {'・'.join(recent_keywords[:10])}"
+    angle = pick_next_angle(recent_qs)
 
     sysprompt = (
         "あなたは中学生向けの記述式問題作成の専門家です。"
@@ -631,6 +718,7 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         f"難易度/配点: {difficulty_label(difficulty)}\n"
         f"単元（任意）: {unit or '特になし'}\n"
         f"出題の方向性（任意）: {genre_hint or '特になし'}\n"
+        f"観点ローテ（直近回避）: {angle['label']}（{angle['hint']}）\n"
         f"避ける話題（任意）: {avoid or '特になし'}\n"
         f"解答分量の目安: {length_hint}\n\n"
         "要件:\n"
@@ -666,7 +754,8 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         '"best_sentence":str,"short_comment":str,"rewrite_tip":str,'
         '"perfect_probability":int,"perfect_probability_note":str,'
         '"model_answer":str,"reasons":[str],'
-        '"full_score_criteria":[str],"full_score_example":str,"model_answer":str}。'
+        '"full_score_criteria":[str],"full_score_example":str,'
+        '"weak_tags":[str],"next_steps":[str],"practice_menu":[str]}。'
         "rubric の各項目は0〜3の整数（結論の明確さ/理由の筋道/用語・表現の適切さ）。"
         "good_points は短い文を2つ、next_step は1つ。"
         "short_comment は1〜2行で簡潔に。"
@@ -675,6 +764,8 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "full_score_criteria は満点に必要な要素を3つ程度、短く箇条書きで。"
         "full_score_example は満点になりやすい短い例文（参考解答と同等でも可）。"
         "next_step は「結論→理由→具体例1つ」で、30〜80字の1文にする。"
+        "next_steps は1〜3個、達成条件付きの具体的な手順にする。"
+        "practice_menu は1〜3個、すぐできる練習メニューにする。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
@@ -686,6 +777,142 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     )
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
+
+def length_bucket(length: int) -> str:
+    if length < 30:
+        return "short"
+    if length > 80:
+        return "long"
+    return "ideal"
+
+def build_next_step_templates(length: int) -> Dict[str, Dict[str, Any]]:
+    return {
+        "length_short": {
+            "category": "length",
+            "text": "結論→理由→具体例1つで30〜80字に整える（例: 結論／理由／具体例を1文でつなぐ）",
+            "steps": [
+                "結論を文頭に1文で書く（〜である）。",
+                "理由を「〜だから」で1つ足す。",
+                "具体例は1つだけ入れて30〜80字に収める。",
+            ],
+            "practice": [
+                "結論だけ10字以内で書く",
+                "理由を1つだけ足して30字台にする",
+                "具体例を1つ加えて50〜70字にする",
+            ],
+        },
+        "length_long": {
+            "category": "length",
+            "text": "80字以内に収めるため、具体例は1つに絞り、重複表現を削る",
+            "steps": [
+                "具体例を1つに絞る。",
+                "同じ意味の語を1か所削る。",
+                "30〜80字に収まるか数える。",
+            ],
+            "practice": [
+                "具体例を1つだけ残す",
+                "主語を1つに絞る",
+                "70字以内に要約する",
+            ],
+        },
+        "logic": {
+            "category": "logic",
+            "text": "理由→結論が1文でつながる形にする（「〜だから、〜である」）",
+            "steps": [
+                "理由を1つに絞る。",
+                "「〜だから、〜である」で1文にする。",
+                "具体例は1つだけ添える。",
+            ],
+            "practice": [
+                "理由を1語でメモする",
+                "理由＋結論だけで1文を書く",
+                "具体例を1つ足して完成させる",
+            ],
+        },
+        "conclusion": {
+            "category": "conclusion",
+            "text": "文頭で結論を明示する（「〜である。」から始める）",
+            "steps": [
+                "最初の10字で結論を書く。",
+                "理由を「〜から」でつなぐ。",
+                "具体例を1つ入れて整える。",
+            ],
+            "practice": [
+                "結論だけを先に書く",
+                "理由を1つだけ追加する",
+                "具体例を1つ足して30〜80字にする",
+            ],
+        },
+        "wording": {
+            "category": "wording",
+            "text": "重要語句を1つ入れ、主語を明確にする",
+            "steps": [
+                "重要語句を1つ選ぶ。",
+                "主語を入れて文頭に置く。",
+                "理由と具体例を1つずつ足す。",
+            ],
+            "practice": [
+                "重要語句を1語追加する",
+                "主語を明確にする",
+                "30〜80字で言い切る",
+            ],
+        },
+        "example": {
+            "category": "example",
+            "text": "具体例を1つ入れる（地名/数字/出来事のどれか1つでOK）",
+            "steps": [
+                "具体例を1つ決める（地名/数字/出来事）。",
+                "結論と理由にその例を結びつける。",
+                "30〜80字に整える。",
+            ],
+            "practice": [
+                "具体例だけを書き出す",
+                "結論＋理由＋具体例で1文にする",
+                "字数を70字前後に調整する",
+            ],
+        },
+    }
+
+def choose_next_step_category(length: int, rubric: Dict[str, int]) -> str:
+    if length_bucket(length) == "short":
+        return "length_short"
+    if length_bucket(length) == "long":
+        return "length_long"
+    weakest = min(rubric.items(), key=lambda x: x[1])[0] if rubric else "logic"
+    if weakest == "conclusion":
+        return "conclusion"
+    if weakest == "wording":
+        return "wording"
+    return "logic"
+
+def build_next_step_pack(length: int, rubric: Dict[str, int], history: List[str]) -> Tuple[str, str, List[str], List[str]]:
+    templates = build_next_step_templates(length)
+    cat = choose_next_step_category(length, rubric)
+    recent = history[-2:] if history else []
+    if recent and all(h == cat for h in recent):
+        for alt in ("example", "logic", "conclusion", "wording", "length_short", "length_long"):
+            if alt in templates and alt != cat:
+                cat = alt
+                break
+    tpl = templates.get(cat, templates["logic"])
+    return cat, tpl["text"], tpl["steps"], tpl["practice"]
+
+def build_full_score_checks(criteria: List[str], answer: str, rubric: Dict[str, int]) -> List[Dict[str, Any]]:
+    answer_norm = normalize_for_match(answer)
+    checks: List[Dict[str, Any]] = []
+    for c in criteria:
+        met = False
+        if "結論" in c:
+            met = rubric.get("conclusion", 0) >= 2
+        elif "理由" in c or "因果" in c:
+            met = rubric.get("logic", 0) >= 2
+        elif "用語" in c or "語句" in c:
+            met = rubric.get("wording", 0) >= 2
+        else:
+            keys = extract_keywords(c, limit=6)
+            met = any(k in answer_norm for k in keys)
+        checks.append({"text": c, "met": bool(met)})
+    return checks
 
 # =========================
 # ルート（UI）
@@ -882,10 +1109,19 @@ def stock_list():
     unit = request.args.get("unit", "")
     difficulty = request.args.get("difficulty", "")
     max_points = request.args.get("max_points", "")
+    order = request.args.get("order", "new")
     try:
         max_points_int = int(max_points) if max_points else None
     except Exception:
         max_points_int = None
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", str(MAX_STOCK)))))
+    except Exception:
+        limit = MAX_STOCK
+    try:
+        offset = max(0, int(request.args.get("offset", "0")))
+    except Exception:
+        offset = 0
 
     def match(it: Dict[str, Any]) -> bool:
         if subject and it.get("subject") != subject:
@@ -903,10 +1139,27 @@ def stock_list():
         return True
 
     items = [enrich_stock_item(it) for it in current_stocks() if match(it)]
+    items = sorted(items, key=lambda x: x.get("created_at", 0), reverse=(order != "old"))
+    total = len(items)
+    items = items[offset: offset + limit]
     # ✅ 生徒にヒントを見せない（講師コードが無ければヒントを落とす）
     if not _is_teacher_request():
         items = [_strip_hints(dict(it)) for it in items]
-    return jsonify({"ok": True, "items": items, "count": len(items), "limit": MAX_STOCK}), 200
+    return jsonify({"ok": True, "items": items, "count": len(items), "limit": limit, "total": total, "offset": offset}), 200
+
+@app.get("/api/stock/get")
+def stock_get():
+    item_id = normalize_text(request.args.get("id", ""))[:64]
+    if not item_id:
+        return jsonify({"ok": False, "error": "id is required"}), 400
+    path = STOCK_DIR / f"{item_id}.json"
+    if not path.exists():
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    item = load_stock_item(path) or {}
+    item = enrich_stock_item(item)
+    if not _is_teacher_request():
+        item = _strip_hints(dict(item))
+    return jsonify({"ok": True, "item": item}), 200
 
 @app.get("/api/stock/search")
 def stock_search():
@@ -919,6 +1172,7 @@ def stock_search():
     difficulty = request.args.get("difficulty", "")
     max_points = request.args.get("max_points", "")
     source = request.args.get("source", "")
+    order = request.args.get("order", "new")
     try:
         max_points_int = int(max_points) if max_points else None
     except Exception:
@@ -958,6 +1212,7 @@ def stock_search():
         return True
 
     items = [enrich_stock_item(it) for it in current_stocks() if match(it)]
+    items = sorted(items, key=lambda x: x.get("created_at", 0), reverse=(order != "old"))
     total = len(items)
     sliced = items[offset: offset + limit]
 
@@ -1258,10 +1513,13 @@ def generate_question():
         if not question:
             continue
 
-        if any(is_similar(question, prev_q) for prev_q in recent_qs):
+        similar_by_text = any(is_similar(question, prev_q) for prev_q in recent_qs)
+        similar_by_keywords = any(keyword_overlap_score(question, prev_q) >= 0.4 for prev_q in recent_qs[:5])
+        if similar_by_text or similar_by_keywords:
             if attempt == 0:
+                overlap_note = "直近の問題と類似するテーマ・キーワード"
                 payload["avoid_topics"] = normalize_text(
-                    f"{payload.get('avoid_topics', '')}／直近の問題と類似するテーマ"
+                    f"{payload.get('avoid_topics', '')}／{overlap_note}"
                 )[:120]
                 continue
         break
@@ -1369,14 +1627,6 @@ def grade_answer():
         good_points.append("問いに沿った要素が書けています")
     good_points = good_points[:2]
 
-    next_step = normalize_text(result.get("next_step", ""))[:160]
-    template_note = "結論→理由→具体例1つで30〜80字の1文にしよう"
-    generic_hits = ("具体的", "詳しく", "詳細", "もっと", "より")
-    if not next_step or any(k in next_step for k in generic_hits):
-        next_step = template_note
-    elif template_note not in next_step:
-        next_step = f"{next_step}（{template_note}）"
-
     rubric_raw = result.get("rubric", {}) if isinstance(result.get("rubric", {}), dict) else {}
     def _rubric_score(key: str) -> int:
         try:
@@ -1390,6 +1640,35 @@ def grade_answer():
         "wording": _rubric_score("wording"),
     }
 
+    answer_length = len(data["student_answer"])
+    history = session.get("next_step_history") or []
+    category, next_step_text, next_steps_fallback, practice_fallback = build_next_step_pack(
+        answer_length, rubric, history
+    )
+
+    next_step_raw = normalize_text(result.get("next_step", ""))[:160]
+    generic_hits = ("具体的", "詳しく", "詳細", "もっと", "より")
+    next_step = next_step_raw if next_step_raw and not any(k in next_step_raw for k in generic_hits) else next_step_text
+
+    next_steps = result.get("next_steps", [])
+    if not isinstance(next_steps, list):
+        next_steps = []
+    next_steps = [normalize_text(str(x))[:120] for x in next_steps if str(x).strip()]
+    if not next_steps:
+        next_steps = next_steps_fallback
+
+    practice_menu = result.get("practice_menu", [])
+    if not isinstance(practice_menu, list):
+        practice_menu = []
+    practice_menu = [normalize_text(str(x))[:120] for x in practice_menu if str(x).strip()]
+    if not practice_menu:
+        practice_menu = practice_fallback
+
+    weak_tags = result.get("weak_tags", [])
+    if not isinstance(weak_tags, list):
+        weak_tags = []
+    weak_tags = [normalize_text(str(x))[:20] for x in weak_tags if str(x).strip()]
+
     best_sentence = (result.get("best_sentence", "") or "").strip()
     short_comment = (result.get("short_comment", "") or "").strip()
     rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
@@ -1398,7 +1677,7 @@ def grade_answer():
     score_label = f"{max_score}点"
 
     model_ans = (data.get("model_answer", "") or result.get("model_answer", "") or "").strip()
-    full_score_example = (result.get("full_score_example", "") or model_ans).strip()
+    full_score_example = (model_ans or result.get("full_score_example", "") or "").strip()
 
     if model_ans and is_high_match(data["student_answer"], model_ans, threshold=0.98):
         score_total_raw = 10
@@ -1425,6 +1704,8 @@ def grade_answer():
     if not criteria:
         criteria = ["結論が明確", "理由が1つ以上ある", "重要語句が入っている"]
 
+    full_score_checks = build_full_score_checks(criteria, data["student_answer"], rubric)
+
     prob_raw = result.get("perfect_probability", None)
     prob_note = (result.get("perfect_probability_note", "") or "").strip()
 
@@ -1449,6 +1730,11 @@ def grade_answer():
         "student_answer": data["student_answer"],
         "score": score_total_scaled,
         "perfect_probability": prob,
+        "assist_on": data.get("assist_on", False),
+        "rewrite_count": data.get("rewrite_count", 0),
+        "selected_full_score": data.get("selected_full_score", data["difficulty"]),
+        "last10_scores": data.get("last10_scores", []),
+        "answer_length": answer_length,
         "ts": now_ms()
     })
 
@@ -1476,6 +1762,9 @@ def grade_answer():
     else:
         rubric_diff = {k: 0 for k in rubric.keys()}
 
+    history = (session.get("next_step_history") or []) + [category]
+    session["next_step_history"] = history[-5:]
+
     session["last_result"] = {
         "question": data["question"],
         "answer": data["student_answer"],
@@ -1499,6 +1788,10 @@ def grade_answer():
         "short_comment": short_comment,
         "good_points": good_points,
         "next_step": next_step,
+        "next_step_category": category,
+        "next_steps": next_steps,
+        "practice_menu": practice_menu,
+        "weak_tags": weak_tags,
         "rubric": rubric,
         "best_sentence": best_sentence,
         "rewrite_tip": rewrite_tip,
@@ -1509,10 +1802,17 @@ def grade_answer():
         "reasons": reasons,
         "full_score_example": full_score_example,
         "full_score_criteria": criteria,
+        "full_score_checks": full_score_checks,
         "perfect_probability": prob,
         "perfect_probability_note": prob_note,
         "max_score": max_score,
-        "score_label": score_label
+        "score_label": score_label,
+        "answer_length": answer_length,
+        "length_bucket": length_bucket(answer_length),
+        "assist_on": data.get("assist_on", False),
+        "rewrite_count": data.get("rewrite_count", 0),
+        "selected_full_score": data.get("selected_full_score", data["difficulty"]),
+        "last10_scores": data.get("last10_scores", []),
     }), 200
 
 # =========================
