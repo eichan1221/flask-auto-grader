@@ -5,9 +5,11 @@
   --accent:#f9a8d4; --accent-strong:#f472b6;
   --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
   --card:#ffffff; --border:#e5e7eb; --shadow:rgba(0,0,0,0.08);
+  --action-bar-height:64px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;background:linear-gradient(180deg,var(--bg1),var(--bg2))}
+body{padding-bottom:calc(var(--action-bar-height) + env(safe-area-inset-bottom, 0px))}
 header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,0.75);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--border)}
 .wrap{max-width:1100px;margin:0 auto;padding:16px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -47,7 +49,7 @@ textarea{min-height:120px;resize:vertical}
 .qcard.mini{background:#fdf7ff}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
 .hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
-.toast{position:fixed;right:16px;bottom:16px;background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
+.toast{position:fixed;right:16px;bottom:calc(var(--action-bar-height) + 12px);background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
 .toast.show{opacity:1;transform:none}
 .danger{color:var(--err)}
 .success{color:var(--ok)}
@@ -137,6 +139,14 @@ textarea{min-height:120px;resize:vertical}
 
 /* 結果ヘッダブロック */
 .result-header{background:linear-gradient(180deg,#fff,#f7f2ff)}
+.result-summary{display:flex;flex-direction:column;gap:12px}
+.summary-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.summary-continue{border-top:1px dashed var(--border);padding-top:10px}
+.result-details{margin-top:12px;border:1px dashed var(--border);border-radius:14px;padding:10px 12px;background:#fff}
+.result-details summary{cursor:pointer;font-weight:700;list-style:none;color:#111827}
+.result-details summary::-webkit-details-marker{display:none}
+.result-detail-body{margin-top:10px}
 .rubric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:8px}
 @media (max-width:700px){.rubric-grid{grid-template-columns:1fr}}
 .rubric-item{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;background:#fff}
@@ -156,7 +166,7 @@ textarea{min-height:120px;resize:vertical}
 
 /* フィードバック */
 .feedback-fab{
-  position:fixed;right:18px;bottom:72px;z-index:20;
+  position:fixed;right:18px;bottom:calc(var(--action-bar-height) + 20px);z-index:20;
   background:var(--brand);color:#fff;border:none;border-radius:999px;
   padding:10px 16px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,0.18);cursor:pointer
 }
@@ -193,3 +203,36 @@ textarea{min-height:120px;resize:vertical}
 .tab-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
 .tab-panel{display:none}
 .tab-panel.active{display:block}
+
+/* 下部固定アクションバー */
+.action-bar{
+  position:fixed;left:0;right:0;bottom:0;z-index:30;
+  display:flex;gap:8px;justify-content:space-around;align-items:center;
+  padding:8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background:rgba(255,255,255,0.95);
+  border-top:1px solid var(--border);
+  backdrop-filter:saturate(180%) blur(8px);
+}
+.action-btn{
+  flex:1;
+  min-height:48px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:#fff;
+  font-weight:700;
+  font-size:14px;
+  cursor:pointer;
+}
+.action-btn:active{transform:translateY(1px)}
+.action-btn:first-child{background:var(--brand);border-color:var(--brand);color:#fff}
+
+@media (max-width:700px){
+  h1{font-size:18px}
+  h2{font-size:17px}
+  h3{font-size:14px}
+  input[type=text], select, textarea{font-size:15px;padding:12px 14px}
+  .card{padding:14px}
+  .summary-grid{grid-template-columns:1fr}
+  .btn{font-size:15px}
+  .next-cta .small{display:none}
+}
