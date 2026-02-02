@@ -135,9 +135,9 @@
             <div id="genQuestion" style="margin:8px 0;font-size:15px;line-height:1.6"></div>
             <div class="flex" id="genTags" style="gap:6px;flex-wrap:wrap"></div>
             <div class="divider"></div>
-            <div class="flex" style="gap:8px;align-items:center">
-              <button class="btn brand cta" id="btnUseForGrading">この問題で解答する</button>
-              <span class="small muted">押すと解答欄まで移動します</span>
+            <div class="flex next-cta" style="gap:8px;align-items:center">
+              <button class="btn brand cta" id="btnUseForGrading">解答へ</button>
+              <span class="small muted">次の行動は「解答へ」だけでOK</span>
               <label class="pill"><input type="checkbox" id="toggleHints"> ヒントを表示</label>
               <span id="dupNote" class="small"></span>
             </div>
@@ -217,9 +217,11 @@
 
         <div class="assist-head">
           <div class="flex" style="gap:8px;align-items:center">
-            <span class="pill"><input type="checkbox" id="assistToggle"> アシストON（結論/理由/具体例の骨組み）</span>
-            <span class="small muted">書けないときはONにして骨組みを作成</span>
+            <span class="pill"><input type="checkbox" id="assistToggle"> アシストON（骨組みテンプレ）</span>
+            <button class="btn small" id="btnInsertAssistTemplate" type="button">テンプレを挿入</button>
+            <span class="small muted">結論→理由→具体例→まとめの型で書き始められます</span>
           </div>
+          <div class="small muted" id="assistTemplateHint">既に書いた内容は上書きせず、末尾やカーソル位置に追記します。</div>
         </div>
 
         <div id="assistPanel" class="qcard assist-panel" style="display:none;margin-top:10px">
@@ -279,26 +281,8 @@
         </div>
 
         <div id="gradeResult" style="margin-top:12px;display:none">
-          <div class="qcard mini" id="continueScoreCard">
-            <div class="small muted">このアプリ、続けたいですか？（0〜10）</div>
-            <div class="continue-score" id="continueScoreButtons" role="group" aria-label="続けたい度の選択">
-              <button class="chip" data-score="0">0</button>
-              <button class="chip" data-score="1">1</button>
-              <button class="chip" data-score="2">2</button>
-              <button class="chip" data-score="3">3</button>
-              <button class="chip" data-score="4">4</button>
-              <button class="chip" data-score="5">5</button>
-              <button class="chip" data-score="6">6</button>
-              <button class="chip" data-score="7">7</button>
-              <button class="chip" data-score="8">8</button>
-              <button class="chip" data-score="9">9</button>
-              <button class="chip" data-score="10">10</button>
-            </div>
-            <div class="small muted" id="continueScoreStatus"></div>
-          </div>
-
-          <div class="qcard result-header" id="resultHeader">
-            <div class="flex" style="justify-content:space-between;gap:10px">
+          <div class="qcard result-summary" id="resultHeader">
+            <div class="summary-row">
               <div>
                 <div class="caps">今回の得点</div>
                 <div id="scoreLine" class="success" style="font-weight:700;font-size:20px"></div>
@@ -309,101 +293,121 @@
                 <span id="rewriteTip"></span>
               </div>
             </div>
-
-            <div class="grid-2" style="margin-top:10px">
+            <div class="summary-grid">
               <div>
-                <div class="small muted">✅ 今回の良かった点</div>
-                <ul id="goodPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+                <div class="small muted">あなたの一番良い一文</div>
+                <div id="bestSentence" class="mono" style="margin-top:6px"></div>
               </div>
               <div>
-                <div class="small muted">🎯 次回はここだけ直そう</div>
+                <div class="small muted">次回ここだけ直そう</div>
                 <div id="nextStep" style="margin-top:6px"></div>
               </div>
             </div>
-
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">満点条件（必須要素）</div>
-            <ul id="fullScoreCriteriaCheck" class="criteria-check" style="margin-top:6px"></ul>
-            <div class="small muted" id="modelCopyNote" style="margin-top:6px">模範解答をそのまま書けば、原則として選択配点の満点になります。</div>
-
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">ルーブリック（毎回同じ尺度）</div>
-            <div class="rubric-grid" id="rubricScores"></div>
-
-            <div class="divider" style="margin:12px 0"></div>
-            <div class="small muted">あなたの一番良い一文</div>
-            <div id="bestSentence" class="mono" style="margin-top:6px"></div>
-
-            <div id="improvementsWrap" style="display:none;margin-top:12px">
-              <div class="small muted">前回より改善した点</div>
-              <ul id="improvements" style="margin:6px 0 0;padding-left:18px"></ul>
-              <div class="small muted" style="margin-top:6px">ルーブリックの前回比</div>
-              <div id="rubricDiff" class="rubric-diff"></div>
-            </div>
-
-            <div class="flex" style="gap:8px;margin-top:12px">
-              <button class="btn brand" id="btnRewrite">書き直して再採点する</button>
+            <div class="summary-continue" id="continueScoreCard">
+              <div class="small muted">続けたい度（0〜10）</div>
+              <div class="continue-score" id="continueScoreButtons" role="group" aria-label="続けたい度の選択">
+                <button class="chip" data-score="0">0</button>
+                <button class="chip" data-score="1">1</button>
+                <button class="chip" data-score="2">2</button>
+                <button class="chip" data-score="3">3</button>
+                <button class="chip" data-score="4">4</button>
+                <button class="chip" data-score="5">5</button>
+                <button class="chip" data-score="6">6</button>
+                <button class="chip" data-score="7">7</button>
+                <button class="chip" data-score="8">8</button>
+                <button class="chip" data-score="9">9</button>
+                <button class="chip" data-score="10">10</button>
+              </div>
+              <div class="small muted" id="continueScoreStatus"></div>
             </div>
           </div>
 
-          <h3>採点結果</h3>
-          <div class="qcard">
-            <div class="result-tabs" id="resultTabs">
-              <button class="tab-btn active" data-tab="tabCommentary">講評</button>
-              <button class="tab-btn" data-tab="tabModel">模範解答</button>
-              <button class="tab-btn" data-tab="tabExplanation">解説・出題意図</button>
-              <button class="tab-btn" data-tab="tabReasons">理由</button>
+          <details class="result-details" id="resultDetails">
+            <summary>詳細（講評・模範解答・解説など）</summary>
+            <div class="result-detail-body">
+              <div class="qcard">
+                <div class="result-tabs" id="resultTabs">
+                  <button class="tab-btn active" data-tab="tabCommentary">講評</button>
+                  <button class="tab-btn" data-tab="tabModel">模範解答</button>
+                  <button class="tab-btn" data-tab="tabExplanation">解説・出題意図</button>
+                  <button class="tab-btn" data-tab="tabReasons">理由</button>
+                </div>
+
+                <!-- ✅ 満点確率表示 -->
+                <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
+
+                <div class="tab-panel active" id="tabCommentary">
+                  <div class="small muted" style="margin-top:10px">講評</div>
+                  <div id="commentary" style="margin:6px 0 8px"></div>
+                </div>
+
+                <div class="tab-panel" id="tabModel">
+                  <div class="small muted" style="margin-top:10px">模範解答（表示と採点参照は同一）</div>
+                  <div id="gradedModel" class="mono"></div>
+                </div>
+
+                <div class="tab-panel" id="tabExplanation">
+                  <div class="small muted" style="margin-top:10px">解説</div>
+                  <div id="gradedExplanation" style="margin-top:4px"></div>
+                  <div class="divider" style="margin:12px 0"></div>
+                  <div class="small muted">出題意図</div>
+                  <div id="gradedIntention" style="margin-top:4px"></div>
+                </div>
+
+                <div class="tab-panel" id="tabReasons">
+                  <div class="small muted" style="margin-top:10px">理由</div>
+                  <ul id="reasons" style="margin-top:4px"></ul>
+                </div>
+
+                <!-- ✅ 追加：次の一手（行動） -->
+                <div class="divider" style="margin:12px 0"></div>
+
+                <div id="weakTagsWrap" style="display:none">
+                  <div class="small muted">弱点タグ</div>
+                  <div id="weakTags" class="flex" style="gap:6px;flex-wrap:wrap;margin-top:4px"></div>
+                </div>
+
+                <div id="nextStepsWrap" style="display:none;margin-top:10px">
+                  <div class="small muted">次の一手（達成条件つき）</div>
+                  <ul id="nextSteps" style="margin-top:4px"></ul>
+                </div>
+
+                <div id="practiceMenuWrap" style="display:none;margin-top:10px">
+                  <div class="small muted">練習メニュー（すぐできる）</div>
+                  <ul id="practiceMenu" style="margin-top:4px"></ul>
+                </div>
+              </div>
+
+              <div class="qcard mini" style="margin-top:12px">
+                <div class="small muted">✅ 今回の良かった点</div>
+                <ul id="goodPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+              </div>
+
+              <div class="qcard mini" style="margin-top:12px">
+                <div class="small muted">満点条件（必須要素）</div>
+                <ul id="fullScoreCriteriaCheck" class="criteria-check" style="margin-top:6px"></ul>
+                <div class="small muted" id="modelCopyNote" style="margin-top:6px">模範解答をそのまま書けば、原則として選択配点の満点になります。</div>
+              </div>
+
+              <div class="qcard mini" style="margin-top:12px">
+                <div class="small muted">ルーブリック（毎回同じ尺度）</div>
+                <div class="rubric-grid" id="rubricScores"></div>
+                <div id="improvementsWrap" style="display:none;margin-top:12px">
+                  <div class="small muted">前回より改善した点</div>
+                  <ul id="improvements" style="margin:6px 0 0;padding-left:18px"></ul>
+                  <div class="small muted" style="margin-top:6px">ルーブリックの前回比</div>
+                  <div id="rubricDiff" class="rubric-diff"></div>
+                </div>
+              </div>
+
+              <div class="flex" style="gap:8px;margin-top:12px">
+                <button class="btn brand" id="btnRewrite">書き直して再採点する</button>
+              </div>
+              <div class="flex" style="gap:8px;margin-top:10px">
+                <button class="btn brand" id="btnRetrySame">解答を消して同じ問題を最初から解く</button>
+              </div>
             </div>
-
-            <!-- ✅ 満点確率表示 -->
-            <div id="perfectProbLine" class="small muted" style="margin-top:4px"></div>
-
-            <div class="tab-panel active" id="tabCommentary">
-              <div class="small muted" style="margin-top:10px">講評</div>
-              <div id="commentary" style="margin:6px 0 8px"></div>
-            </div>
-
-            <div class="tab-panel" id="tabModel">
-              <div class="small muted" style="margin-top:10px">模範解答（表示と採点参照は同一）</div>
-              <div id="gradedModel" class="mono"></div>
-            </div>
-
-            <div class="tab-panel" id="tabExplanation">
-              <div class="small muted" style="margin-top:10px">解説</div>
-              <div id="gradedExplanation" style="margin-top:4px"></div>
-              <div class="divider" style="margin:12px 0"></div>
-              <div class="small muted">出題意図</div>
-              <div id="gradedIntention" style="margin-top:4px"></div>
-            </div>
-
-            <div class="tab-panel" id="tabReasons">
-              <div class="small muted" style="margin-top:10px">理由</div>
-              <ul id="reasons" style="margin-top:4px"></ul>
-            </div>
-
-            <!-- ✅ 追加：次の一手（行動） -->
-            <div class="divider" style="margin:12px 0"></div>
-
-            <div id="weakTagsWrap" style="display:none">
-              <div class="small muted">弱点タグ</div>
-              <div id="weakTags" class="flex" style="gap:6px;flex-wrap:wrap;margin-top:4px"></div>
-            </div>
-
-            <div id="nextStepsWrap" style="display:none;margin-top:10px">
-              <div class="small muted">次の一手（達成条件つき）</div>
-              <ul id="nextSteps" style="margin-top:4px"></ul>
-            </div>
-
-            <div id="practiceMenuWrap" style="display:none;margin-top:10px">
-              <div class="small muted">練習メニュー（すぐできる）</div>
-              <ul id="practiceMenu" style="margin-top:4px"></ul>
-            </div>
-          </div>
-
-          <!-- ✅ 追加：再挑戦（同じ問題で即リトライ） -->
-          <div class="flex" style="gap:8px;margin-top:10px">
-            <button class="btn brand" id="btnRetrySame">解答を消して同じ問題を最初から解く</button>
-          </div>
+          </details>
         </div>
       </section>
     </div>
@@ -634,6 +638,13 @@
 
   <button class="feedback-fab" id="btnFeedback" type="button">フィードバック</button>
 
+  <div class="action-bar" id="actionBar" role="navigation" aria-label="主要アクション">
+    <button class="action-btn" data-action="grade">採点</button>
+    <button class="action-btn" data-action="rewrite">書き直し</button>
+    <button class="action-btn" data-action="next">次の問題</button>
+    <button class="action-btn" data-action="stock">ストック</button>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
@@ -665,6 +676,7 @@
       '結論は〜である。',
       'つまり、〜ということだ。'
     ];
+    const ASSIST_TEMPLATE = '結論：＿＿＿＿。理由：＿＿＿＿。具体例：＿＿＿＿。まとめ：＿＿＿＿。';
 
     function escapeHtml(s){
       return String(s ?? '')
@@ -673,6 +685,35 @@
         .replaceAll('>','&gt;')
         .replaceAll('"','&quot;')
         .replaceAll("'","&#39;");
+    }
+
+    function scrollToElement(el, focus=false){
+      if(!el) return;
+      el.scrollIntoView({behavior:'smooth', block:'start'});
+      if(focus){
+        setTimeout(()=>{ try{ el.focus(); }catch(e){} }, 200);
+      }
+    }
+
+    function scrollToAnswer(focus=false){
+      scrollToElement($('#studentAnswer'), focus);
+    }
+
+    function scrollToResult(){
+      scrollToElement($('#resultHeader'));
+    }
+
+    function insertAtCursor(textarea, text){
+      if(!textarea) return;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? textarea.value.length;
+      const current = textarea.value;
+      const before = current.slice(0, start);
+      const after = current.slice(end);
+      const spacer = before && !before.endsWith('\n') ? '\n' : '';
+      textarea.value = `${before}${spacer}${text}${after}`;
+      const nextPos = (before + spacer + text).length;
+      textarea.setSelectionRange(nextPos, nextPos);
     }
 
     function renderRubric(rubric, hint){
@@ -1016,6 +1057,7 @@
       loadSettings();
       updateFeedbackCount();
       updateCharCount();
+      setAssistUI($('#assistToggle')?.checked);
 
       renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
       renderAssistStarters();
@@ -1090,6 +1132,7 @@
         refreshStockSummary();
         await refreshUsage();
         toast('問題を生成しました');
+        scrollToAnswer(true);
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
@@ -1282,8 +1325,7 @@
 
       applyScienceConstraints();
 
-      document.querySelector('#studentAnswer')?.scrollIntoView({behavior:'smooth', block:'start'});
-      $('#studentAnswer')?.focus();
+      scrollToAnswer(true);
       toast('採点対象にセットしました');
     }
 
@@ -1522,6 +1564,13 @@
       }
     }
 
+    function setAssistUI(on){
+      const panel = $('#assistPanel');
+      if(panel) panel.style.display = on ? '' : 'none';
+      const insertBtn = $('#btnInsertAssistTemplate');
+      if(insertBtn) insertBtn.disabled = !on;
+    }
+
     async function sendContinueScore(score, btn){
       const status = $('#continueScoreStatus');
       const role = localStorage.getItem('feedbackRole') || 'unknown';
@@ -1748,6 +1797,7 @@
         updateAssistStatus();
         await refreshUsage();
         toast('採点しました');
+        scrollToResult();
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
@@ -1855,7 +1905,7 @@
       $('#studentAnswer').value = '';
       updateCharCount();
       clearGradeResultUI();
-      $('#studentAnswer').focus();
+      scrollToAnswer(true);
       toast('解答を消しました。同じ問題を最初から解き直せます');
     };
 
@@ -1866,7 +1916,7 @@
       }
       $('#studentAnswer').value = lastGradedAnswer;
       updateCharCount();
-      $('#studentAnswer').focus();
+      scrollToAnswer(true);
       toast('前回の解答を読み直して書き直しましょう（再採点されます）');
     };
 
@@ -1924,7 +1974,7 @@
 
     $('#assistToggle').onchange = ()=>{
       const on = $('#assistToggle').checked;
-      $('#assistPanel').style.display = on ? '' : 'none';
+      setAssistUI(on);
       updateAssistStatus();
     };
 
@@ -1940,8 +1990,21 @@
       }
       $('#studentAnswer').value = text;
       updateCharCount();
-      $('#studentAnswer').focus();
+      scrollToAnswer(true);
       toast('解答欄に反映しました');
+    };
+
+    $('#btnInsertAssistTemplate').onclick = ()=>{
+      const toggle = $('#assistToggle');
+      if(toggle && !toggle.checked){
+        toggle.checked = true;
+        setAssistUI(true);
+      }
+      const textarea = $('#studentAnswer');
+      insertAtCursor(textarea, ASSIST_TEMPLATE);
+      updateCharCount();
+      scrollToAnswer(true);
+      toast('テンプレを挿入しました');
     };
 
     $('#studentAnswer').addEventListener('input', ()=>{
@@ -1956,6 +2019,22 @@
         if(howto && howto.classList.contains('show')) closeHowto();
         if(fb && fb.classList.contains('show')) closeFeedback();
         if(stock && stock.classList.contains('show')) closeStockModal();
+      }
+    });
+
+    $('#actionBar').addEventListener('click', (e)=>{
+      const btn = e.target.closest('.action-btn');
+      if(!btn) return;
+      const action = btn.dataset.action;
+      const map = {
+        grade: '#btnGrade',
+        rewrite: '#btnRewrite',
+        next: '#btnGenerate',
+        stock: '#btnOpenStock'
+      };
+      const target = map[action] ? $(map[action]) : null;
+      if(target){
+        target.click();
       }
     });
 
