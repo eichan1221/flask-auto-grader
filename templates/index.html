@@ -20,6 +20,7 @@
 
         <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
         <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
+        <button class="btn brand" id="btnStudyTips" title="勉強法のコツを開く">これをすれば成績が上がる勉強法！</button>
 
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
@@ -521,6 +522,34 @@
     </div>
   </div>
 
+  <div class="modal" id="studyTipsModal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="studyTipsTitle">
+      <div class="panelHeader">
+        <div>
+          <h2 class="panelTitle" id="studyTipsTitle">これをすれば成績が上がる勉強法！</h2>
+          <div class="small muted">記述力が伸びる黄金ループ</div>
+        </div>
+        <div class="flex" style="gap:8px">
+          <button class="btn" id="btnStudyTipsClose" aria-label="勉強法モーダルを閉じる">閉じる</button>
+        </div>
+      </div>
+
+      <div class="panelBody">
+        <div style="line-height:1.9">
+          <p style="margin:0 0 10px"><strong>これをすれば成績が上がる勉強法！（記述力が伸びる黄金ループ）</strong></p>
+          <ol style="padding-left:20px;margin:0">
+            <li><strong>まずは一旦考えて、自分の力で解いてみる！</strong><br>最初に自力で書こうとすることで脳が働き、理解が深まります。</li>
+            <li style="margin-top:8px"><strong>すぐに出てこない時は「解説（ヒント）」を見る</strong><br>答えを丸写しするのではなく、「なぜそうなるか」のポイントをつかみましょう。</li>
+            <li style="margin-top:8px"><strong>そのあと、もう一度“自分の言葉”で書いてみる</strong><br>おすすめの型は「結論 → 理由 → 具体例（根拠）」です。短くても形が整うと点が伸びます。</li>
+            <li style="margin-top:8px"><strong>添削後は、講評を確認してリライトする</strong><br>良かった点と改善点を1つずつ押さえて、同じミスを繰り返さないのがコツです。</li>
+            <li style="margin-top:8px"><strong>これを最低3回くり返す（書く→添削→リライト）</strong><br>回数を重ねるほど、書き方が体に入り、記述力が確実に身につきます。</li>
+          </ol>
+          <p style="margin:12px 0 0">大事なのは<strong>「理解して定着させること」</strong>。<br>それができれば、成績は必ず上がります。いきましょう！</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- =========================
        ✅ ストック モーダル
        ========================= -->
@@ -640,8 +669,7 @@
 
   <div class="ai-teacher-hint" id="aiTeacherHint">疑問はAI先生に聞いてみよう！</div>
   <button class="ai-teacher-fab" id="btnAiTeacher" type="button" aria-label="AI先生に質問する">
-    <img src="/static/ai_teacher.svg" alt="AI先生" />
-    <span>AI先生</span>
+    <img src="{{ url_for('static', filename='ai_teacher.svg') }}" alt="AI先生" />
   </button>
 
   <div class="modal" id="aiTeacherModal" aria-hidden="true">
@@ -1073,6 +1101,22 @@
       m.classList.remove('show');
       m.setAttribute('aria-hidden','true');
       setTimeout(()=>{ $('#btnHowto').focus(); }, 0);
+    }
+
+    function openStudyTips(){
+      const m = $('#studyTipsModal');
+      if(!m) return;
+      m.classList.add('show');
+      m.setAttribute('aria-hidden','false');
+      setTimeout(()=>{ $('#btnStudyTipsClose')?.focus(); }, 0);
+    }
+
+    function closeStudyTips(){
+      const m = $('#studyTipsModal');
+      if(!m) return;
+      m.classList.remove('show');
+      m.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ $('#btnStudyTips')?.focus(); }, 0);
     }
 
     function openStockModal(){
@@ -2105,6 +2149,12 @@
       if(e.target === e.currentTarget) closeHowto();
     });
 
+    $('#btnStudyTips')?.addEventListener('click', openStudyTips);
+    $('#btnStudyTipsClose')?.addEventListener('click', closeStudyTips);
+    $('#studyTipsModal')?.addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget) closeStudyTips();
+    });
+
     $('#btnOpenStock').onclick = openStockModal;
     $('#btnStockClose').onclick = closeStockModal;
     $('#stockModal').addEventListener('click', (e)=>{
@@ -2194,11 +2244,13 @@
 
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
+      const studyTips = $('#studyTipsModal');
       const fb = $('#feedbackModal');
       const stock = $('#stockModal');
       const ai = $('#aiTeacherModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
+        if(studyTips && studyTips.classList.contains('show')) closeStudyTips();
         if(fb && fb.classList.contains('show')) closeFeedback();
         if(stock && stock.classList.contains('show')) closeStockModal();
         if(ai && ai.classList.contains('show')) closeAiTeacher();

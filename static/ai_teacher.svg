@@ -2,41 +2,58 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#F6E9FF"/>
-      <stop offset="1" stop-color="#E7F3FF"/>
+      <stop offset="0" stop-color="#E9F7FF"/>
+      <stop offset="1" stop-color="#F6ECFF"/>
     </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" result="blur"/>
+      <feOffset dx="0" dy="1" result="off"/>
+      <feMerge>
+        <feMergeNode in="off"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
 
-  <!-- background bubble -->
+  <!-- soft circle background -->
   <circle cx="48" cy="48" r="44" fill="url(#bg)"/>
-  <circle cx="48" cy="48" r="42" fill="none" stroke="#DCCBFF" stroke-width="2"/>
+  <circle cx="48" cy="48" r="42" fill="none" stroke="#CFE8FF" stroke-width="2"/>
 
-  <!-- face -->
-  <ellipse cx="48" cy="52" rx="22" ry="20" fill="#FFE9D6" stroke="#F2CDB5" stroke-width="1.5"/>
-  <!-- hair -->
-  <path d="M27 49c2-16 13-24 21-24s19 8 21 24c-4-6-10-9-21-9s-17 3-21 9z" fill="#5A4A6A" opacity="0.9"/>
+  <!-- ears (long, floppy) -->
+  <path d="M18 52c-4-10 3-20 13-22 6-1 10 2 12 6-8 2-14 8-16 16-2 6-4 6-9 0z"
+        fill="#FFFFFF" stroke="#D7E9F7" stroke-width="2" filter="url(#soft)"/>
+  <path d="M78 52c4-10-3-20-13-22-6-1-10 2-12 6 8 2 14 8 16 16 2 6 4 6 9 0z"
+        fill="#FFFFFF" stroke="#D7E9F7" stroke-width="2" filter="url(#soft)"/>
 
-  <!-- cap -->
-  <path d="M30 34l18-10 18 10-18 10-18-10z" fill="#6D55FF" opacity="0.85"/>
-  <path d="M36 37v8c0 6 6 9 12 9s12-3 12-9v-8" fill="#6D55FF" opacity="0.65"/>
-  <path d="M66 34l8 4" stroke="#6D55FF" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="75" cy="39" r="3" fill="#6D55FF"/>
+  <!-- head -->
+  <ellipse cx="48" cy="54" rx="24" ry="21" fill="#FFFFFF" stroke="#D7E9F7" stroke-width="2" filter="url(#soft)"/>
 
-  <!-- eyes -->
-  <circle cx="40" cy="52" r="3.2" fill="#2C2C2C"/>
-  <circle cx="56" cy="52" r="3.2" fill="#2C2C2C"/>
-  <circle cx="39" cy="51" r="1" fill="#FFFFFF" opacity="0.9"/>
-  <circle cx="55" cy="51" r="1" fill="#FFFFFF" opacity="0.9"/>
+  <!-- little curl tail icon (tiny) -->
+  <path d="M67 70c5 0 7 5 2 7-4 2-8-2-5-5 2-2 4-1 4 0"
+        fill="none" stroke="#A7D8FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+
+  <!-- graduation cap -->
+  <path d="M28 34l20-10 20 10-20 10-20-10z" fill="#7A5CFF" opacity="0.85"/>
+  <path d="M34 37v8c0 7 7 11 14 11s14-4 14-11v-8" fill="#7A5CFF" opacity="0.60"/>
+  <path d="M68 34l8 4" stroke="#7A5CFF" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="77" cy="39" r="3" fill="#7A5CFF"/>
+
+  <!-- eyes (blue) -->
+  <ellipse cx="40" cy="54" rx="3.6" ry="4.2" fill="#66B6FF"/>
+  <ellipse cx="56" cy="54" rx="3.6" ry="4.2" fill="#66B6FF"/>
+  <circle cx="39" cy="52.8" r="1" fill="#FFFFFF" opacity="0.95"/>
+  <circle cx="55" cy="52.8" r="1" fill="#FFFFFF" opacity="0.95"/>
 
   <!-- cheeks -->
-  <circle cx="34.5" cy="58" r="3.2" fill="#FFB6C6" opacity="0.6"/>
-  <circle cx="61.5" cy="58" r="3.2" fill="#FFB6C6" opacity="0.6"/>
+  <circle cx="34.5" cy="61" r="3.2" fill="#FFB6C6" opacity="0.55"/>
+  <circle cx="61.5" cy="61" r="3.2" fill="#FFB6C6" opacity="0.55"/>
 
   <!-- mouth -->
-  <path d="M44 61c2 2 6 2 8 0" stroke="#C46B6B" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M44 64c2 2 6 2 8 0" stroke="#7A8AA0" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <circle cx="48" cy="61.5" r="1.5" fill="#7A8AA0" opacity="0.55"/>
 
-  <!-- tiny speech bubble -->
-  <path d="M63 24c8 0 13 4 13 10s-5 10-13 10c-2 0-4 0-6-1l-5 3 2-5c-3-2-4-4-4-7 0-6 5-10 13-10z"
-        fill="#FFFFFF" opacity="0.9" stroke="#DCCBFF" stroke-width="1.5"/>
-  <text x="63" y="38" font-size="14" text-anchor="middle" fill="#6D55FF" font-family="Arial, sans-serif">？</text>
+  <!-- mini speech bubble with ? -->
+  <path d="M64 20c9 0 14 4 14 11s-5 11-14 11c-2 0-4 0-6-1l-6 3 2-6c-3-2-4-5-4-7 0-7 5-11 14-11z"
+        fill="#FFFFFF" opacity="0.92" stroke="#CFE8FF" stroke-width="1.6"/>
+  <text x="64" y="36" font-size="14" text-anchor="middle" fill="#66B6FF" font-family="Arial, sans-serif">？</text>
 </svg>
