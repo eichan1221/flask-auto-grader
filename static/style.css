@@ -122,8 +122,8 @@ textarea{min-height:120px;resize:vertical}
 /* キーボード操作の可視フォーカス（見た目は通常時変化なし） */
 :focus-visible{ outline:2px solid var(--brand-strong); outline-offset:2px; }
 
-/* model 表示は非表示に */
-#modelTag{ display:none; }
+/* model 表示 */
+#modelTag{ display:inline-flex; }
 
 /* =========================
    使い方モーダル（小ウィンドウ）
