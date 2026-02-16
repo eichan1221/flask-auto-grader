@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F6E9FF"/>
+      <stop offset="1" stop-color="#E7F3FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background bubble -->
+  <circle cx="48" cy="48" r="44" fill="url(#bg)"/>
+  <circle cx="48" cy="48" r="42" fill="none" stroke="#DCCBFF" stroke-width="2"/>
+
+  <!-- face -->
+  <ellipse cx="48" cy="52" rx="22" ry="20" fill="#FFE9D6" stroke="#F2CDB5" stroke-width="1.5"/>
+  <!-- hair -->
+  <path d="M27 49c2-16 13-24 21-24s19 8 21 24c-4-6-10-9-21-9s-17 3-21 9z" fill="#5A4A6A" opacity="0.9"/>
+
+  <!-- cap -->
+  <path d="M30 34l18-10 18 10-18 10-18-10z" fill="#6D55FF" opacity="0.85"/>
+  <path d="M36 37v8c0 6 6 9 12 9s12-3 12-9v-8" fill="#6D55FF" opacity="0.65"/>
+  <path d="M66 34l8 4" stroke="#6D55FF" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="75" cy="39" r="3" fill="#6D55FF"/>
+
+  <!-- eyes -->
+  <circle cx="40" cy="52" r="3.2" fill="#2C2C2C"/>
+  <circle cx="56" cy="52" r="3.2" fill="#2C2C2C"/>
+  <circle cx="39" cy="51" r="1" fill="#FFFFFF" opacity="0.9"/>
+  <circle cx="55" cy="51" r="1" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- cheeks -->
+  <circle cx="34.5" cy="58" r="3.2" fill="#FFB6C6" opacity="0.6"/>
+  <circle cx="61.5" cy="58" r="3.2" fill="#FFB6C6" opacity="0.6"/>
+
+  <!-- mouth -->
+  <path d="M44 61c2 2 6 2 8 0" stroke="#C46B6B" stroke-width="2" stroke-linecap="round" fill="none"/>
+
+  <!-- tiny speech bubble -->
+  <path d="M63 24c8 0 13 4 13 10s-5 10-13 10c-2 0-4 0-6-1l-5 3 2-5c-3-2-4-4-4-7 0-6 5-10 13-10z"
+        fill="#FFFFFF" opacity="0.9" stroke="#DCCBFF" stroke-width="1.5"/>
+  <text x="63" y="38" font-size="14" text-anchor="middle" fill="#6D55FF" font-family="Arial, sans-serif">？</text>
+</svg>
