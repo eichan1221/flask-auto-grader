@@ -638,6 +638,41 @@
 
   <button class="feedback-fab" id="btnFeedback" type="button">フィードバック</button>
 
+  <div class="ai-teacher-hint" id="aiTeacherHint">疑問はAI先生に聞いてみよう！</div>
+  <button class="ai-teacher-fab" id="btnAiTeacher" type="button" aria-label="AI先生に質問する">
+    <img src="/static/ai_teacher.svg" alt="AI先生" />
+    <span>AI先生</span>
+  </button>
+
+  <div class="modal" id="aiTeacherModal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="aiTeacherTitle">
+      <div class="panelHeader">
+        <div>
+          <h2 class="panelTitle" id="aiTeacherTitle">AI先生に質問</h2>
+          <div class="small muted">※氏名・学校名など個人情報は入力しないでください</div>
+        </div>
+        <div class="flex" style="gap:8px">
+          <button class="btn" id="btnAiTeacherClose" aria-label="AI先生モーダルを閉じる">閉じる</button>
+        </div>
+      </div>
+      <div class="panelBody">
+        <div class="pill" style="margin-bottom:8px"><input type="checkbox" id="aiTeacherUseContext" checked> この問題の文脈も一緒に送る</div>
+        <div id="aiTeacherChat" class="ai-chat-log" aria-live="polite"></div>
+        <div class="flex" style="justify-content:space-between;margin-top:10px">
+          <div class="small muted" id="aiTeacherStatus"></div>
+          <button class="btn" id="btnAiTeacherClear" type="button">履歴クリア</button>
+        </div>
+        <div class="flex" style="margin-top:10px;align-items:flex-end">
+          <div style="flex:1">
+            <label for="aiTeacherInput">質問内容</label>
+            <textarea id="aiTeacherInput" placeholder="わからないところを日本語で質問してね" maxlength="1200" style="min-height:88px"></textarea>
+          </div>
+          <button class="btn brand" id="btnAiTeacherSend" type="button">送信</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="action-bar" id="actionBar" role="navigation" aria-label="主要アクション">
     <button class="action-btn" data-action="grade">採点</button>
     <button class="action-btn" data-action="rewrite">書き直し</button>
@@ -677,6 +712,9 @@
       'つまり、〜ということだ。'
     ];
     const ASSIST_TEMPLATE = '結論：＿＿＿＿。理由：＿＿＿＿。具体例：＿＿＿＿。まとめ：＿＿＿＿。';
+
+    const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
+    const AI_TEACHER_MAX_MESSAGES = 60;
 
     function escapeHtml(s){
       return String(s ?? '')
@@ -929,6 +967,7 @@
     let rewriteCount = 0;
     let scoreHistory = [];
     let rubricHistory = [];
+    let aiTeacherMessages = [];
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -1052,12 +1091,134 @@
       setTimeout(()=>{ $('#btnOpenStock')?.focus(); }, 0);
     }
 
+    function loadAiTeacherMessages(){
+      try{
+        const raw = localStorage.getItem(AI_TEACHER_STORAGE_KEY);
+        const parsed = JSON.parse(raw || '[]');
+        if(Array.isArray(parsed)){
+          aiTeacherMessages = parsed
+            .filter(x => x && (x.role === 'user' || x.role === 'assistant' || x.role === 'error') && typeof x.content === 'string')
+            .slice(-AI_TEACHER_MAX_MESSAGES);
+        }else{
+          aiTeacherMessages = [];
+        }
+      }catch(e){
+        aiTeacherMessages = [];
+      }
+    }
+
+    function saveAiTeacherMessages(){
+      aiTeacherMessages = aiTeacherMessages.slice(-AI_TEACHER_MAX_MESSAGES);
+      localStorage.setItem(AI_TEACHER_STORAGE_KEY, JSON.stringify(aiTeacherMessages));
+    }
+
+    function appendAiTeacherMessage(role, content){
+      aiTeacherMessages.push({ role, content: String(content || ''), ts: Date.now() });
+      saveAiTeacherMessages();
+      renderAiTeacherMessages();
+    }
+
+    function renderAiTeacherMessages(){
+      const chat = $('#aiTeacherChat');
+      if(!chat) return;
+      if(!aiTeacherMessages.length){
+        chat.innerHTML = '<div class="small muted">ここで「わからない点」を気軽に質問できます。</div>';
+        return;
+      }
+      chat.innerHTML = '';
+      aiTeacherMessages.forEach(msg=>{
+        const row = document.createElement('div');
+        row.className = `ai-chat-row ${msg.role === 'user' ? 'user' : 'assistant'}`;
+        const bubble = document.createElement('div');
+        bubble.className = `ai-chat-bubble ${msg.role === 'error' ? 'error' : ''}`;
+        bubble.textContent = msg.content;
+        row.appendChild(bubble);
+        chat.appendChild(row);
+      });
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function collectAiTeacherContext(){
+      return {
+        question: ($('#genResult')?.textContent || '').trim(),
+        hint: ($('#hintBox')?.textContent || '').trim(),
+        rubric: ($('#rubricCard')?.textContent || '').trim(),
+        student_answer: ($('#studentAnswer')?.value || '').trim(),
+        grade_result: ($('#gradeResult')?.textContent || '').trim(),
+      };
+    }
+
+    function openAiTeacher(){
+      const modal = $('#aiTeacherModal');
+      const status = $('#aiTeacherStatus');
+      if(status) status.textContent = '';
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden','false');
+      renderAiTeacherMessages();
+      setTimeout(()=>{ $('#aiTeacherInput')?.focus(); }, 0);
+    }
+
+    function closeAiTeacher(){
+      const modal = $('#aiTeacherModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden','true');
+      setTimeout(()=>{ $('#btnAiTeacher')?.focus(); }, 0);
+    }
+
+    async function sendAiTeacherMessage(){
+      const input = $('#aiTeacherInput');
+      const status = $('#aiTeacherStatus');
+      const sendBtn = $('#btnAiTeacherSend');
+      const message = (input?.value || '').trim();
+      if(!message){
+        if(status) status.textContent = '質問を入力してください。';
+        return;
+      }
+      appendAiTeacherMessage('user', message);
+      input.value = '';
+      if(status) status.textContent = 'AI先生が考え中…';
+      sendBtn.disabled = true;
+
+      const loading = document.createElement('div');
+      loading.className = 'ai-chat-row assistant';
+      loading.id = 'aiTeacherLoading';
+      loading.innerHTML = '<div class="ai-chat-bubble loading">…</div>';
+      const chatEl = $('#aiTeacherChat');
+      chatEl?.appendChild(loading);
+      if(chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+
+      try{
+        const body = { message };
+        if($('#aiTeacherUseContext')?.checked){
+          body.context = collectAiTeacherContext();
+        }
+        const r = await apiPost('/api/ask_ai', body);
+        document.getElementById('aiTeacherLoading')?.remove();
+        if(!r?.ok || !r?.answer){
+          const reason = r?.error || 'unknown_error';
+          appendAiTeacherMessage('error', `送信に失敗しました（${reason}）`);
+          if(status) status.textContent = `送信に失敗しました（${reason}）`;
+          return;
+        }
+        appendAiTeacherMessage('assistant', r.answer);
+        if(status) status.textContent = '回答を受信しました。';
+      }catch(e){
+        document.getElementById('aiTeacherLoading')?.remove();
+        appendAiTeacherMessage('error', `送信に失敗しました（${e.message}）`);
+        if(status) status.textContent = `送信に失敗しました（${e.message}）`;
+      }finally{
+        sendBtn.disabled = false;
+      }
+    }
+
     // ---- 初期化 ----
     async function boot(){
       loadSettings();
       updateFeedbackCount();
       updateCharCount();
       setAssistUI($('#assistToggle')?.checked);
+      loadAiTeacherMessages();
+      renderAiTeacherMessages();
 
       renderRubric(DEFAULT_RUBRIC, DEFAULT_RUBRIC_HINT);
       renderAssistStarters();
@@ -1972,6 +2133,26 @@
     $('#feedbackForm').addEventListener('submit', handleFeedbackSubmit);
     $('#feedbackMessage').addEventListener('input', updateFeedbackCount);
 
+    $('#btnAiTeacher').onclick = openAiTeacher;
+    $('#btnAiTeacherClose').onclick = closeAiTeacher;
+    $('#aiTeacherModal').addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget) closeAiTeacher();
+    });
+    $('#btnAiTeacherSend').onclick = sendAiTeacherMessage;
+    $('#btnAiTeacherClear').onclick = ()=>{
+      aiTeacherMessages = [];
+      saveAiTeacherMessages();
+      renderAiTeacherMessages();
+      const status = $('#aiTeacherStatus');
+      if(status) status.textContent = '履歴をクリアしました。';
+    };
+    $('#aiTeacherInput').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
+        sendAiTeacherMessage();
+        e.preventDefault();
+      }
+    });
+
     $('#assistToggle').onchange = ()=>{
       const on = $('#assistToggle').checked;
       setAssistUI(on);
@@ -2015,10 +2196,12 @@
       const howto = $('#howtoModal');
       const fb = $('#feedbackModal');
       const stock = $('#stockModal');
+      const ai = $('#aiTeacherModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
         if(fb && fb.classList.contains('show')) closeFeedback();
         if(stock && stock.classList.contains('show')) closeStockModal();
+        if(ai && ai.classList.contains('show')) closeAiTeacher();
       }
     });
 

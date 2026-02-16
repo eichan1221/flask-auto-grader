@@ -380,6 +380,32 @@ def parse_first_json_block(text: str) -> Dict[str, Any]:
             return {}
     return {}
 
+
+def short_text(s: Any, limit: int = 200) -> str:
+    txt = normalize_text(str(s or ""))
+    if len(txt) <= limit:
+        return txt
+    return txt[:limit] + "…"
+
+
+def summarize_context(context: Any) -> Dict[str, str]:
+    if not isinstance(context, dict):
+        return {}
+    summary: Dict[str, str] = {}
+    for key in ("question", "hint", "rubric", "student_answer", "grade_result"):
+        if key in context and context.get(key):
+            summary[key] = short_text(context.get(key), 220)
+    # その他のキーは先頭8件だけ収集（過剰ログ防止）
+    for k, v in list(context.items())[:8]:
+        ks = normalize_text(str(k))[:40]
+        if not ks or ks in summary:
+            continue
+        if isinstance(v, (dict, list)):
+            summary[ks] = short_text(json.dumps(v, ensure_ascii=False), 220)
+        else:
+            summary[ks] = short_text(v, 220)
+    return summary
+
 def require_access_code(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -777,6 +803,41 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     )
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
+
+
+def build_ask_ai_messages(message: str, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    ctx = context if isinstance(context, dict) else {}
+    ctx_lines: List[str] = []
+    key_labels = {
+        "question": "問題文",
+        "hint": "ヒント",
+        "rubric": "採点観点",
+        "student_answer": "ユーザー解答",
+        "grade_result": "採点結果",
+    }
+    for key, label in key_labels.items():
+        val = short_text(ctx.get(key, ""), 800)
+        if val:
+            ctx_lines.append(f"- {label}: {val}")
+
+    sysprompt = (
+        "あなたは『AI先生』です。中学生〜高校生にもわかる、やさしく丁寧な日本語で説明してください。"
+        "必ず返答の最初の1行で『個人情報（氏名・学校名など）は入力しないでください。』と注意してください。"
+        "解き方を理解できるように導き、丸投げの答えだけを返さないでください。"
+        "以下の3部構成を必ず守ってください:"
+        "1) 要点（1〜2行）"
+        "2) 具体例（1つ）"
+        "3) 書き方の型（短いテンプレ）"
+        "文脈が与えられた場合はその内容を優先して説明してください。"
+        "出力はプレーンテキストのみで、過度に長くしすぎないでください。"
+    )
+    user_prompt = f"質問: {message}\n"
+    if ctx_lines:
+        user_prompt += "\n参考文脈:\n" + "\n".join(ctx_lines)
+    return [
+        {"role": "system", "content": sysprompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
 def length_bucket(length: int) -> str:
     if length < 30:
@@ -1814,6 +1875,57 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
     }), 200
+
+
+# =========================
+# AI先生チャット API
+# =========================
+@app.post("/api/ask_ai")
+@require_access_code
+@rate_limit
+def ask_ai():
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "invalid_content_type", "detail": "Content-Type must be application/json"}), 400
+
+    payload = request.get_json(force=True, silent=True) or {}
+    message = normalize_text(payload.get("message", ""))
+    context = payload.get("context", {}) if isinstance(payload.get("context", {}), dict) else {}
+
+    if not message:
+        return jsonify({"ok": False, "error": "invalid_request", "detail": "message は必須です"}), 400
+
+    err = ensure_openai()
+    if err:
+        return jsonify({"ok": False, "error": "openai_unavailable", "detail": err}), 500
+
+    log_record = {
+        "timestamp": now_ms(),
+        "ok": False,
+        "message": short_text(message, 400),
+        "context_summary": summarize_context(context),
+    }
+
+    try:
+        rsp = client.chat.completions.create(
+            model=MODEL_ID,
+            messages=build_ask_ai_messages(message, context),
+            temperature=0.4,
+            max_tokens=500,
+        )
+        answer = normalize_text((rsp.choices[0].message.content or "").strip())
+        if not answer:
+            log_record["error"] = "empty_answer"
+            append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
+            return jsonify({"ok": False, "error": "empty_answer", "detail": "AIの応答が空でした"}), 500
+
+        log_record["ok"] = True
+        log_record["answer"] = short_text(answer, 500)
+        append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
+        return jsonify({"ok": True, "answer": answer}), 200
+    except Exception as e:
+        log_record["error"] = f"OpenAI API error: {e}"
+        append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
+        return jsonify({"ok": False, "error": "openai_api_error", "detail": str(e)}), 500
 
 # =========================
 # エクスポート（✅講師専用コードで保護）
