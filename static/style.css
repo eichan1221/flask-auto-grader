@@ -239,21 +239,23 @@ textarea{min-height:120px;resize:vertical}
 
 /* AI先生チャット */
 .ai-teacher-fab{
-  position:fixed;right:18px;bottom:calc(var(--action-bar-height) + 84px);z-index:24;
-  border:1px solid #e9dbff;
+  position:fixed;right:16px;bottom:calc(var(--action-bar-height) + 84px);z-index:99999;
+  width:72px;height:72px;
+  border:2px solid #e9dbff;
   background:linear-gradient(180deg,#fff,#f9f2ff);
-  border-radius:999px;
-  padding:8px 12px;
+  border-radius:50%;
+  overflow:hidden;
+  padding:0;
   font-weight:700;
   color:#5b4a75;
   box-shadow:0 12px 28px rgba(109,85,255,0.25);
   cursor:pointer;
-  display:flex;align-items:center;gap:8px;
+  display:flex;align-items:center;justify-content:center;
 }
-.ai-teacher-fab img{width:34px;height:34px;border-radius:50%;background:#fff;border:1px solid #e6d8ff}
+.ai-teacher-fab img{width:100%;height:100%;object-fit:cover;display:block}
 .ai-teacher-fab:hover{transform:translateY(-1px);box-shadow:0 14px 30px rgba(109,85,255,0.32)}
 .ai-teacher-hint{
-  position:fixed;right:22px;bottom:calc(var(--action-bar-height) + 142px);z-index:24;
+  position:fixed;right:22px;bottom:calc(var(--action-bar-height) + 162px);z-index:99999;
   background:#fff;border:1px solid #eadcff;border-radius:999px;padding:6px 10px;
   font-size:12px;color:#6d55ff;box-shadow:0 6px 16px rgba(109,85,255,0.16);
 }
@@ -275,7 +277,6 @@ textarea{min-height:120px;resize:vertical}
 .ai-chat-bubble.loading{opacity:0.8}
 
 @media (max-width:700px){
-  .ai-teacher-fab{right:12px;bottom:calc(var(--action-bar-height) + 80px);padding:8px 10px}
-  .ai-teacher-fab span{display:none}
-  .ai-teacher-hint{right:12px;bottom:calc(var(--action-bar-height) + 132px)}
+  .ai-teacher-fab{right:12px;bottom:calc(var(--action-bar-height) + 80px);width:64px;height:64px}
+  .ai-teacher-hint{right:12px;bottom:calc(var(--action-bar-height) + 148px)}
 }
