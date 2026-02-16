@@ -554,6 +554,15 @@
             <div class="study-tip-number">2</div>
             <div><strong>すぐに出てこない時は「解説（ヒント）」を見る</strong><br>答えを丸写しするのではなく、「なぜそうなるか」のポイントをつかみましょう。</div>
           </li>
+        </ol>
+
+        <div class="studyTips-highlight" role="note" aria-live="polite">
+          <p>解説を見ても分からなかったら、AI先生に質問してみましょう！<br>分からないところを曖昧にしたまま進めないことが、とても重要です。<br>実際に教育現場でも、「分からない部分をそのままにしてしまう癖」が原因で、成績が伸び悩んでいるケースが多く見られます。<br>小さな疑問のうちに解消するほど、理解が積み上がって記述力も安定して伸びます。</p>
+          <button class="studyTips-askBtn" id="btnStudyTipsAskAi" type="button">AI先生、ここが分かりません！</button>
+          <div class="small muted" id="studyTipsAskStatus" aria-live="polite"></div>
+        </div>
+
+        <ol class="study-tip-list" start="3">
           <li class="study-tip-item">
             <div class="study-tip-number">3</div>
             <div><strong>そのあと、もう一度“自分の言葉”で書いてみる</strong><br>おすすめの型は「結論 → 理由 → 具体例（根拠）」です。短くても形が整うと点が伸びます。</div>
@@ -1148,6 +1157,41 @@
 
     function closeStudyTips(){
       closeModal('studyTipsModal', '#btnStudyTips');
+    }
+
+    function openAiTeacherFromStudyTips(){
+      const status = $('#studyTipsAskStatus');
+      if(status) status.textContent = '';
+
+      const aiModal = document.getElementById('aiTeacherModal');
+      if(typeof openModal === 'function' && aiModal){
+        closeModal('studyTipsModal');
+        openModal('aiTeacherModal', '#aiTeacherInput');
+        $('#aiTeacherStatus') && ($('#aiTeacherStatus').textContent = '勉強法モーダルから質問を開きました。');
+        renderAiTeacherMessages();
+        return;
+      }
+
+      const aiFab = document.getElementById('btnAiTeacher') || document.getElementById('aiTeacherFab');
+      if(aiFab && typeof aiFab.click === 'function'){
+        closeModal('studyTipsModal');
+        aiFab.click();
+        return;
+      }
+
+      if(aiModal){
+        closeModal('studyTipsModal');
+        aiModal.classList.add('show');
+        aiModal.style.display = 'flex';
+        aiModal.setAttribute('aria-hidden', 'false');
+        renderAiTeacherMessages();
+        setTimeout(()=>{ $('#aiTeacherInput')?.focus(); }, 0);
+        return;
+      }
+
+      const msg = 'AI先生ボタンが見つかりませんでした。右下のAI先生アイコンが表示されているか確認してください。';
+      if(status) status.textContent = msg;
+      console.warn(msg);
     }
 
     function openStockModal(){
@@ -2191,6 +2235,7 @@
     $('#btnStudyTips')?.addEventListener('click', openStudyTips);
     $('#btnStudyTipsClose')?.addEventListener('click', closeStudyTips);
     $('#btnStudyTipsCloseX')?.addEventListener('click', closeStudyTips);
+    $('#btnStudyTipsAskAi')?.addEventListener('click', openAiTeacherFromStudyTips);
     $('#studyTipsModal')?.addEventListener('click', (e)=>{
       if(e.target === e.currentTarget) closeStudyTips();
     });

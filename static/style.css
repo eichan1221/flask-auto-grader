@@ -192,6 +192,42 @@ textarea{min-height:120px;resize:vertical}
   border-radius:12px;
   padding:10px 12px;
 }
+
+.studyTips-highlight{
+  border:1px solid #f5d0fe;
+  border-radius:14px;
+  background:linear-gradient(180deg,#fff8ff,#fdf4ff);
+  padding:12px;
+  box-shadow:0 8px 20px rgba(216,180,254,0.18);
+}
+.studyTips-highlight p{
+  margin:0;
+  color:#4c1d95;
+  line-height:1.8;
+  font-weight:600;
+}
+.studyTips-highlight .small{margin-top:8px;display:block;min-height:1.2em}
+.studyTips-askBtn{
+  margin-top:10px;
+  border:none;
+  border-radius:999px;
+  padding:10px 16px;
+  font-weight:800;
+  color:#4c1d95;
+  background:linear-gradient(135deg,#fde68a,#fbcfe8 55%,#ddd6fe);
+  box-shadow:0 8px 18px rgba(168,85,247,0.22);
+  cursor:pointer;
+  transition:transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+.studyTips-askBtn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 24px rgba(168,85,247,0.28);
+  filter:saturate(1.08);
+}
+.studyTips-askBtn:focus-visible{
+  outline:3px solid rgba(168,85,247,0.35);
+  outline-offset:2px;
+}
 .callout{
   background:linear-gradient(180deg,#fff7ff,#f5fbff);
   border:1px solid var(--border);
