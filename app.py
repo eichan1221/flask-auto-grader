@@ -98,12 +98,15 @@ ACCESS_CODE = (os.getenv("ACCESS_CODE") or "").strip() or None
 # 未設定の場合は常に403（うっかり公開を防ぐ）
 EXPORT_CODE = (os.getenv("EXPORT_CODE") or "").strip() or None
 
-MODEL_ID = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+# OpenAIモデルは全機能で必ずこの定数を参照する（直書き禁止）
+DEFAULT_MODEL = "gpt-4o-mini"
+MODEL_ID = DEFAULT_MODEL
 RELEASE = os.getenv("RELEASE", "").strip()
 MAX_STOCK = int(os.getenv("MAX_STOCK", "10"))
 NOVELTY_THRESHOLD = float(os.getenv("NOVELTY_THRESHOLD", "0.92"))
 MAX_TOKENS_GEN = int(os.getenv("MAX_TOKENS_GEN", "600"))
 MAX_TOKENS_GRADE = int(os.getenv("MAX_TOKENS_GRADE", "600"))
+MAX_TOKENS_ASK_AI = int(os.getenv("MAX_TOKENS_ASK_AI", "1000"))
 
 # レート制限（IPごと/分あたり）
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
@@ -693,7 +696,7 @@ def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str,
         _openai_ping_cache.update({"ok": False, "detail": "SDK未初期化 or APIキー未設定", "ts": now})
         return False, _openai_ping_cache["detail"], now
     try:
-        client.models.retrieve(MODEL_ID)
+        client.models.retrieve(DEFAULT_MODEL)
         ok = True
         _openai_ping_cache.update({"ok": ok, "detail": "ok", "ts": now})
         return ok, "ok", now
@@ -820,20 +823,40 @@ def build_ask_ai_messages(message: str, context: Optional[Dict[str, Any]] = None
         if val:
             ctx_lines.append(f"- {label}: {val}")
 
-    sysprompt = (
-        "あなたは『AI先生』です。中学生〜高校生にもわかる、やさしく丁寧な日本語で説明してください。"
-        "必ず返答の最初の1行で『個人情報（氏名・学校名など）は入力しないでください。』と注意してください。"
-        "解き方を理解できるように導き、丸投げの答えだけを返さないでください。"
-        "以下の3部構成を必ず守ってください:"
-        "1) 要点（1〜2行）"
-        "2) 具体例（1つ）"
-        "3) 書き方の型（短いテンプレ）"
-        "文脈が与えられた場合はその内容を優先して説明してください。"
-        "出力はプレーンテキストのみで、過度に長くしすぎないでください。"
-    )
+    sysprompt = """あなたは「AI先生」です。中学生〜高校生に向けて、学校や塾の先生のように丁寧に解説します。
+口調はやさしく、結論だけで終わらせず「なぜそうなるか」「どう書けば点が取れるか」を必ず説明してください。
+
+【大原則】
+
+* まずは生徒が自力で考えたことを尊重し、前向きに導く。
+* 断定しすぎず、必要なら最初に確認質問を1つだけする（曖昧なときのみ）。
+* ただの一般論ではなく、与えられた context（問題文/ヒント/採点観点/生徒解答/採点結果）を最優先で使う。
+* 個人情報（氏名・学校名など）は入力しないよう、返答の冒頭に1行だけ注意する。
+
+【出力フォーマット（必ずこの順で）】
+
+1. まず要点（1〜2行で結論）
+2. わかりやすい解説（3〜8行）：原因→理由→つながり
+3. 具体例（1つ）：短い例文・式・言い換えなど
+4. 書き方の型（テンプレ）：記述なら「結論→理由→根拠(具体例)」を基本に、字数内で書ける形にする
+5. 次の一手（箇条書きで1〜3個）：今日すぐ直せる行動にする
+6. 確認（短い質問を1つ）：理解チェック。「どこが一番引っかかった？」など
+
+【禁止】
+
+* 乱暴・極端に短い返答（2〜3行で終わらせない）
+* 「とにかく頑張れ」だけで終わる
+* contextを無視した一般論
+
+【contextの扱い（必須）】
+
+* /api/ask_ai の入力で context があれば、必ず文章内で参照して説明する（問題文に触れる、採点観点を使う等）
+* context が空なら、最初に確認質問を1つだけしてから解説する"""
     user_prompt = f"質問: {message}\n"
     if ctx_lines:
         user_prompt += "\n参考文脈:\n" + "\n".join(ctx_lines)
+    else:
+        user_prompt += "\n参考文脈: （なし）\n※contextが空です。まず確認質問を1つだけしてから、解説を続けてください。"
     return [
         {"role": "system", "content": sysprompt},
         {"role": "user", "content": user_prompt},
@@ -1026,7 +1049,7 @@ def status():
         "ok": True,
         "DATA_DIR": str(DATA),
         "CORS": CORS_ORIGINS,
-        "model": MODEL_ID,
+        "model": DEFAULT_MODEL,
         "release": RELEASE,
         "disk": disk,
         "metrics": {
@@ -1061,7 +1084,7 @@ def env_check():
         "OPENAI_API_KEY": preview(os.getenv("OPENAI_API_KEY")),
         "ACCESS_CODE": preview(ACCESS_CODE),
         "EXPORT_CODE": preview(EXPORT_CODE),
-        "MODEL_ID": MODEL_ID,
+        "MODEL_ID": DEFAULT_MODEL,
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
         "MAX_TOKENS_GRADE": MAX_TOKENS_GRADE,
@@ -1548,8 +1571,9 @@ def generate_question():
     for attempt in range(2):
         messages = build_generation_messages(payload)
         try:
+            # 用途: 問題生成（問題文・模範解答・解説・出題意図の生成）
             rsp = client.chat.completions.create(
-                model=MODEL_ID,
+                model=DEFAULT_MODEL,
                 messages=messages,
                 temperature=0.6,
                 max_tokens=MAX_TOKENS_GEN,
@@ -1605,7 +1629,7 @@ def generate_question():
             "intention": intention,
             "tags": tags
         }
-        return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup, "generated": generated}), 200
+        return jsonify({"ok": True, "duplicate_of": dup.get("id"), "item": dup, "generated": generated, "model": DEFAULT_MODEL}), 200
 
     item = {
         "id": uuid.uuid4().hex,
@@ -1626,7 +1650,7 @@ def generate_question():
         "created_at": now_ms(),
     }
     saved = save_stock_item(item)
-    append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": saved, "ts": now_ms()})
+    append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": saved, "model": DEFAULT_MODEL, "ts": now_ms()})
 
     resp_item = dict(saved)
     if not payload["include_hints"]:
@@ -1634,7 +1658,7 @@ def generate_question():
             resp_item.pop(k, None)
 
     _update_metrics("generate", True, t0)
-    return jsonify({"ok": True, "item": resp_item}), 200
+    return jsonify({"ok": True, "item": resp_item, "model": DEFAULT_MODEL}), 200
 
 # =========================
 # 採点 API
@@ -1662,8 +1686,9 @@ def grade_answer():
 
     messages = build_grading_messages(data)
     try:
+        # 用途: 採点（採点・講評・改善提案）
         rsp = client.chat.completions.create(
-            model=MODEL_ID,
+            model=DEFAULT_MODEL,
             messages=messages,
             temperature=0.2,
             max_tokens=MAX_TOKENS_GRADE,
@@ -1796,6 +1821,7 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "answer_length": answer_length,
+        "model": DEFAULT_MODEL,
         "ts": now_ms()
     })
 
@@ -1874,6 +1900,7 @@ def grade_answer():
         "rewrite_count": data.get("rewrite_count", 0),
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
+        "model": DEFAULT_MODEL,
     }), 200
 
 
@@ -1903,14 +1930,16 @@ def ask_ai():
         "ok": False,
         "message": short_text(message, 400),
         "context_summary": summarize_context(context),
+        "model": DEFAULT_MODEL,
     }
 
     try:
+        # 用途: AI先生チャット（文脈重視の丁寧な解説）
         rsp = client.chat.completions.create(
-            model=MODEL_ID,
+            model=DEFAULT_MODEL,
             messages=build_ask_ai_messages(message, context),
-            temperature=0.4,
-            max_tokens=500,
+            temperature=0.3,
+            max_tokens=MAX_TOKENS_ASK_AI,
         )
         answer = normalize_text((rsp.choices[0].message.content or "").strip())
         if not answer:
@@ -1921,7 +1950,7 @@ def ask_ai():
         log_record["ok"] = True
         log_record["answer"] = short_text(answer, 500)
         append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
-        return jsonify({"ok": True, "answer": answer}), 200
+        return jsonify({"ok": True, "answer": answer, "model": DEFAULT_MODEL}), 200
     except Exception as e:
         log_record["error"] = f"OpenAI API error: {e}"
         append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
@@ -2000,7 +2029,7 @@ def download_logs_zip():
 # ---- モデル情報 ----
 @app.get("/api/model")
 def api_model():
-    return {"model": MODEL_ID}, 200
+    return {"model": DEFAULT_MODEL, "available_models": [DEFAULT_MODEL]}, 200
 
 @app.post("/api/model")
 @require_access_code
@@ -2008,12 +2037,11 @@ def set_model():
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 415
     body = request.get_json(force=True, silent=True) or {}
-    new_model = normalize_text(body.get("model", ""))
-    if not new_model:
-        return jsonify({"ok": False, "error": "model is required"}), 400
-    global MODEL_ID
-    MODEL_ID = new_model
-    return jsonify({"ok": True, "model": MODEL_ID}), 200
+    requested_model = normalize_text(body.get("model", ""))
+    if not requested_model:
+        return jsonify({"ok": False, "error": "model is required", "model": DEFAULT_MODEL}), 400
+    # モデル切替UI/APIが来ても常に gpt-4o-mini に正規化する
+    return jsonify({"ok": True, "requested_model": requested_model, "model": DEFAULT_MODEL}), 200
 
 # ---- エントリポイント ----
 if __name__ == "__main__":
