@@ -783,6 +783,7 @@
 
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
     const AI_TEACHER_MAX_MESSAGES = 60;
+    const AI_TEACHER_HISTORY_LIMIT = 12;
 
     function escapeHtml(s){
       return String(s ?? '')
@@ -1289,8 +1290,27 @@
       setTimeout(()=>{ $('#aiTeacherInput')?.focus(); }, 0);
     }
 
+    function resetAiTeacherState(statusMessage = ''){
+      aiTeacherMessages = [];
+      localStorage.removeItem(AI_TEACHER_STORAGE_KEY);
+      renderAiTeacherMessages();
+      const input = $('#aiTeacherInput');
+      if(input) input.value = '';
+      const status = $('#aiTeacherStatus');
+      if(status) status.textContent = statusMessage;
+    }
+
+    function buildAiTeacherHistory(limit = AI_TEACHER_HISTORY_LIMIT){
+      return aiTeacherMessages
+        .filter(x => x && (x.role === 'user' || x.role === 'assistant') && typeof x.content === 'string')
+        .map(x => ({ role: x.role, content: String(x.content || '').trim().slice(0, 600) }))
+        .filter(x => x.content)
+        .slice(-limit);
+    }
+
     function closeAiTeacher(){
       const modal = $('#aiTeacherModal');
+      resetAiTeacherState('');
       modal.classList.remove('show');
       modal.setAttribute('aria-hidden','true');
       setTimeout(()=>{ $('#btnAiTeacher')?.focus(); }, 0);
@@ -1305,6 +1325,7 @@
         if(status) status.textContent = '質問を入力してください。';
         return;
       }
+      const history = buildAiTeacherHistory();
       appendAiTeacherMessage('user', message);
       input.value = '';
       if(status) status.textContent = 'AI先生が考え中…';
@@ -1319,7 +1340,10 @@
       if(chatEl) chatEl.scrollTop = chatEl.scrollHeight;
 
       try{
-        const body = { message };
+        const body = {
+          message,
+          history,
+        };
         if($('#aiTeacherUseContext')?.checked){
           body.context = collectAiTeacherContext();
         }
@@ -2333,11 +2357,7 @@
     });
     $('#btnAiTeacherSend').onclick = sendAiTeacherMessage;
     $('#btnAiTeacherClear').onclick = ()=>{
-      aiTeacherMessages = [];
-      saveAiTeacherMessages();
-      renderAiTeacherMessages();
-      const status = $('#aiTeacherStatus');
-      if(status) status.textContent = '履歴をクリアしました。';
+      resetAiTeacherState('履歴をクリアしました。');
     };
     $('#aiTeacherInput').addEventListener('keydown', (e)=>{
       if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
