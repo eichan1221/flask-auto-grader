@@ -258,6 +258,23 @@ textarea{min-height:120px;resize:vertical}
 @media (max-width:700px){.rubric-grid{grid-template-columns:1fr}}
 .rubric-item{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:12px;padding:8px 10px;background:#fff}
 .rubric-score{font-weight:700;color:#111827}
+.perfect-badge{
+  margin-top:6px;
+  display:inline-flex;
+  align-items:center;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  color:#7c2d12;
+  background:linear-gradient(135deg,#fde68a,#fbcfe8);
+  border:1px solid #f9a8d4;
+}
+.praise-headline{
+  margin-top:8px;
+  font-weight:700;
+  color:#065f46;
+}
 .rubric-diff{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .rubric-diff .diff{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px}
 .rubric-diff .diff.up{color:var(--ok);border-color:rgba(34,197,94,0.4)}

@@ -291,6 +291,7 @@
               <div>
                 <div class="caps">今回の得点</div>
                 <div id="scoreLine" class="success" style="font-weight:700;font-size:20px"></div>
+                <div id="perfectBadge" class="perfect-badge" style="display:none">🎉満点おめでとう！</div>
                 <div id="shortComment" class="small muted" style="margin-top:4px"></div>
               </div>
               <div class="pill" id="rewriteTipWrap" style="display:none">
@@ -385,7 +386,13 @@
 
               <div class="qcard mini" style="margin-top:12px">
                 <div class="small muted">✅ 今回の良かった点</div>
+                <div id="praiseHeadline" class="praise-headline" style="display:none"></div>
                 <ul id="goodPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+                <div id="keepDoingWrap" style="display:none;margin-top:8px">
+                  <div class="small muted">この先も維持するコツ</div>
+                  <ul id="keepDoing" style="margin:6px 0 0;padding-left:18px"></ul>
+                </div>
+                <div id="optionalChallenge" class="small" style="display:none;margin-top:8px"></div>
               </div>
 
               <div class="qcard mini" style="margin-top:12px">
@@ -859,8 +866,13 @@
       if(gr) gr.style.display = 'none';
 
       const scoreLine = $('#scoreLine'); if(scoreLine) scoreLine.textContent = '';
+      const perfectBadge = $('#perfectBadge'); if(perfectBadge) perfectBadge.style.display = 'none';
       const shortComment = $('#shortComment'); if(shortComment) shortComment.textContent = '';
       const goodPoints = $('#goodPoints'); if(goodPoints) goodPoints.innerHTML = '';
+      const praiseHeadline = $('#praiseHeadline'); if(praiseHeadline){ praiseHeadline.textContent = ''; praiseHeadline.style.display = 'none'; }
+      const keepDoingWrap = $('#keepDoingWrap'); if(keepDoingWrap) keepDoingWrap.style.display = 'none';
+      const keepDoing = $('#keepDoing'); if(keepDoing) keepDoing.innerHTML = '';
+      const optionalChallenge = $('#optionalChallenge'); if(optionalChallenge){ optionalChallenge.textContent = ''; optionalChallenge.style.display = 'none'; }
       const nextStep = $('#nextStep'); if(nextStep) nextStep.textContent = '';
       const rubricScores = $('#rubricScores'); if(rubricScores) rubricScores.innerHTML = '';
       const bestSentence = $('#bestSentence'); if(bestSentence) bestSentence.textContent = '';
@@ -1620,7 +1632,10 @@
     function renderResultHeader(r){
       const score = r?.score_total ?? r?.score ?? 0;
       const label = r?.score_label || `${r?.max_score ?? 10}点`;
-      $('#scoreLine').textContent = `${label}中${score}点`;
+      const isPerfect = Boolean(r?.is_perfect_score) || (Number(score) >= Number(r?.max_score ?? 10));
+      $('#scoreLine').textContent = isPerfect ? `満点（${label}中${score}点）` : `${label}中${score}点`;
+      const perfectBadge = $('#perfectBadge');
+      if(perfectBadge) perfectBadge.style.display = isPerfect ? 'inline-flex' : 'none';
       $('#shortComment').textContent = r?.short_comment || '';
 
       const gp = $('#goodPoints'); gp.innerHTML = '';
@@ -1629,6 +1644,37 @@
         li.textContent = t;
         gp.appendChild(li);
       });
+
+      const praiseHeadline = $('#praiseHeadline');
+      if(praiseHeadline){
+        const txt = (r?.praise_headline || '').trim();
+        praiseHeadline.textContent = txt;
+        praiseHeadline.style.display = txt ? '' : 'none';
+      }
+
+      const keepDoingWrap = $('#keepDoingWrap');
+      const keepDoingList = $('#keepDoing');
+      if(keepDoingWrap && keepDoingList){
+        keepDoingList.innerHTML = '';
+        const keepDoing = Array.isArray(r?.keep_doing) ? r.keep_doing : [];
+        if(keepDoing.length){
+          keepDoingWrap.style.display = '';
+          keepDoing.forEach(s=>{
+            const li = document.createElement('li');
+            li.textContent = s;
+            keepDoingList.appendChild(li);
+          });
+        }else{
+          keepDoingWrap.style.display = 'none';
+        }
+      }
+
+      const optionalChallenge = $('#optionalChallenge');
+      if(optionalChallenge){
+        const challenge = (r?.optional_challenge || '').trim();
+        optionalChallenge.textContent = challenge ? `発展チャレンジ: ${challenge}` : '';
+        optionalChallenge.style.display = challenge ? '' : 'none';
+      }
 
       $('#nextStep').textContent = r?.next_step || '';
 
@@ -1664,7 +1710,7 @@
 
       const tipWrap = $('#rewriteTipWrap');
       const tip = (r?.rewrite_tip || '').trim();
-      if(tip){
+      if(!isPerfect && tip){
         tipWrap.style.display = '';
         $('#rewriteTip').textContent = tip;
       }else{
@@ -1678,7 +1724,7 @@
       const rubricDiff = $('#rubricDiff');
       improvementsList.innerHTML = '';
       rubricDiff.innerHTML = '';
-      if(improvements.length){
+      if(!isPerfect && improvements.length){
         improvementsWrap.style.display = '';
         improvements.forEach(s=>{
           const li = document.createElement('li');
@@ -2034,7 +2080,9 @@
           if(prob === null || prob === undefined){
             line.textContent = '';
           }else{
-            line.textContent = `満点（○）になる確率: ${prob}%${note ? `（${note}）` : ''}`;
+            line.textContent = r?.is_perfect_score
+              ? '満点達成！'
+              : `満点（○）になる確率: ${prob}%${note ? `（${note}）` : ''}`;
           }
         }
 
@@ -2063,7 +2111,7 @@
         const nsUl = $('#nextSteps');
         if(nsWrap && nsUl){
           nsUl.innerHTML = '';
-          if(nextSteps.length){
+          if(!r?.is_perfect_score && nextSteps.length){
             nsWrap.style.display = '';
             nextSteps.slice(0,3).forEach(s=>{
               const li=document.createElement('li');
@@ -2079,7 +2127,7 @@
         const pmUl = $('#practiceMenu');
         if(pmWrap && pmUl){
           pmUl.innerHTML = '';
-          if(practiceMenu.length){
+          if(!r?.is_perfect_score && practiceMenu.length){
             pmWrap.style.display = '';
             practiceMenu.slice(0,3).forEach(s=>{
               const li=document.createElement('li');
