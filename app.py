@@ -107,6 +107,8 @@ NOVELTY_THRESHOLD = float(os.getenv("NOVELTY_THRESHOLD", "0.92"))
 MAX_TOKENS_GEN = int(os.getenv("MAX_TOKENS_GEN", "600"))
 MAX_TOKENS_GRADE = int(os.getenv("MAX_TOKENS_GRADE", "600"))
 MAX_TOKENS_ASK_AI = int(os.getenv("MAX_TOKENS_ASK_AI", "1000"))
+AI_CHAT_HISTORY_MAX_ITEMS = int(os.getenv("AI_CHAT_HISTORY_MAX_ITEMS", "12"))
+AI_CHAT_HISTORY_MAX_CHARS = int(os.getenv("AI_CHAT_HISTORY_MAX_CHARS", "500"))
 
 # レート制限（IPごと/分あたり）
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
@@ -898,8 +900,57 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
             {"role": "user", "content": usr}]
 
 
-def build_ask_ai_messages(message: str, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+def normalize_ask_ai_history(raw_history: Any, max_items: int = AI_CHAT_HISTORY_MAX_ITEMS) -> List[Dict[str, str]]:
+    if not isinstance(raw_history, list):
+        return []
+
+    history: List[Dict[str, str]] = []
+    for item in raw_history:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip()
+        if role not in {"user", "assistant"}:
+            continue
+        content = normalize_text(item.get("content", ""))
+        if not content:
+            continue
+        history.append({"role": role, "content": short_text(content, AI_CHAT_HISTORY_MAX_CHARS)})
+
+    return history[-max_items:]
+
+
+def sanitize_ask_ai_answer(text: str) -> str:
+    lines = (text or "").splitlines()
+    if not lines:
+        return ""
+
+    heading_pattern = re.compile(
+        r"^\s*(?:[①-⑳]|[1-9][0-9]?[\.)]|[一二三四五六七八九十]+[\.)、])?\s*"
+        r"(?:【?\s*(結論|要点|理由(?:\s*/\s*背景)?|具体例|解き方\s*/\s*手順|解き方|手順|つまずきポイント|次の一手)\s*】?)"
+        r"\s*(?:[:：]|$)\s*(.*)$"
+    )
+
+    cleaned: List[str] = []
+    for i, line in enumerate(lines):
+        if i < 5:
+            m = heading_pattern.match(line)
+            if m:
+                tail = (m.group(2) or "").strip()
+                if tail:
+                    cleaned.append(tail)
+                continue
+        cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
+
+
+def build_ask_ai_messages(
+    message: str,
+    context: Optional[Dict[str, Any]] = None,
+    history: Optional[List[Dict[str, str]]] = None,
+) -> List[Dict[str, str]]:
     ctx = context if isinstance(context, dict) else {}
+    safe_history = normalize_ask_ai_history(history)
 
     def ctx_text(key: str, limit: int = 1200) -> str:
         val = ctx.get(key, "")
@@ -913,34 +964,42 @@ def build_ask_ai_messages(message: str, context: Optional[Dict[str, Any]] = None
     model_answer = ctx_text("model_answer", 1200) or ctx_text("hint", 1200)
     grade_result = ctx_text("grade_result", 1200)
 
-    sysprompt = """あなたは『AI先生』です。中高生向けに、やさしく正確に教える先生として解説してください。
+    sysprompt = """あなたは『AI先生』です。中高生に寄り添って教える、丁寧で自然な会話相手として日本語で答えてください。
 
-出力は必ず次の6項目をこの順で作成してください。
-①結論
-②理由/背景
-③具体例
-④解き方/手順
-⑤つまずきポイント
-⑥次の一手（短い課題）
+見出し・番号・ラベル（例: ①②③、1)2)、【結論】、結論：、要点：）は使わないでください。
+説明は会話文として自然につなぎ、必要なら短い箇条書きは使って構いません。
+返答には次の要素を会話の中に自然に含めてください。
+- なぜそうなるか（理由）
+- どう書くと点が取れるか（書き方のコツ）
+- 短い具体例
+- 次にやること（1〜3個）
+- 質問が曖昧なときだけ確認質問を1つ
 
-制約:
-- context にある情報（問題文/生徒解答/採点観点/模範解答/採点結果）を優先して説明する。
-- 断定しすぎず、学習者の理解段階に合わせて1段ずつ説明する。
-- 日本語で、丁寧・簡潔に。
-- 個人情報の入力を求めない。"""
+個人情報の入力は求めず、断定しすぎず、学習者の理解段階に合わせて説明してください。"""
 
-    user_prompt = (
-        f"質問: {message}\n\n"
-        f"問題文: {question or '（なし）'}\n"
-        f"生徒解答: {student_answer or '（なし）'}\n"
-        f"採点観点(rubric): {rubric or '（なし）'}\n"
-        f"模範解答: {model_answer or '（なし）'}\n"
-        f"採点結果: {grade_result or '（なし）'}"
+    context_lines: List[str] = []
+    if question:
+        context_lines.append(f"問題文: {question}")
+    if student_answer:
+        context_lines.append(f"生徒解答: {student_answer}")
+    if rubric:
+        context_lines.append(f"採点観点: {rubric}")
+    if model_answer:
+        context_lines.append(f"模範解答/ヒント: {model_answer}")
+    if grade_result:
+        context_lines.append(f"採点結果: {grade_result}")
+
+    context_prompt = (
+        "以下は参考情報です。必要なときだけ使ってください。\n" + "\n".join(context_lines)
+        if context_lines else ""
     )
-    return [
-        {"role": "system", "content": sysprompt},
-        {"role": "user", "content": user_prompt},
-    ]
+
+    messages: List[Dict[str, str]] = [{"role": "system", "content": sysprompt}]
+    if context_prompt:
+        messages.append({"role": "system", "content": context_prompt})
+    messages.extend(safe_history)
+    messages.append({"role": "user", "content": message})
+    return messages
 
 def length_bucket(length: int) -> str:
     if length < 30:
@@ -2025,6 +2084,7 @@ def ask_ai():
     payload = request.get_json(force=True, silent=True) or {}
     message = normalize_text(payload.get("message", ""))
     context = payload.get("context", {}) if isinstance(payload.get("context", {}), dict) else {}
+    history = normalize_ask_ai_history(payload.get("history", []))
 
     if not message:
         return jsonify({"ok": False, "error": "invalid_request", "detail": "message は必須です"}), 400
@@ -2045,11 +2105,12 @@ def ask_ai():
         # 用途: AI先生チャット（文脈重視の丁寧な解説）
         rsp = client.chat.completions.create(
             model=DEFAULT_MODEL,
-            messages=build_ask_ai_messages(message, context),
+            messages=build_ask_ai_messages(message, context, history),
             temperature=0.2,
             max_tokens=max(MAX_TOKENS_ASK_AI, 1200),
         )
-        answer = normalize_text((rsp.choices[0].message.content or "").strip())
+        answer = sanitize_ask_ai_answer((rsp.choices[0].message.content or "").strip())
+        answer = normalize_text(answer)
         if not answer:
             log_record["error"] = "empty_answer"
             append_jsonl(LOG_DIR / "ai_chat.jsonl", log_record)
