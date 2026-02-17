@@ -674,6 +674,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(last10_scores, list):
         last10_scores = []
     last10_scores = [int(x) for x in last10_scores[:10] if isinstance(x, (int, float, str)) and str(x).isdigit()]
+    stock_id = normalize_text(p.get("stock_id", ""))[:64]
     return {
         "question": question,
         "student_answer": student_answer,
@@ -684,7 +685,50 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "rewrite_count": rewrite_count,
         "selected_full_score": selected_full_score,
         "last10_scores": last10_scores,
+        "stock_id": stock_id,
     }
+
+
+
+def resolve_model_answer(payload: Dict[str, Any]) -> str:
+    """採点に使う模範解答を一本化する。stock_id が有効なら stocks/<id>.json を最優先。"""
+    stock_id = normalize_text(payload.get("stock_id", ""))[:64]
+    if stock_id:
+        stock_path = STOCK_DIR / f"{stock_id}.json"
+        stock = load_stock_item(stock_path)
+        if isinstance(stock, dict):
+            stock_model = normalize_text(stock.get("model_answer", ""))[:2000]
+            if stock_model:
+                return stock_model
+    return normalize_text(payload.get("model_answer", ""))[:2000]
+
+
+def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """JSON mode で採点し、JSONパース失敗時は最大2回リトライ（合計3試行）。"""
+    last_text = ""
+    for attempt in range(1, 4):
+        rsp = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=MAX_TOKENS_GRADE,
+        )
+        text = (rsp.choices[0].message.content or "").strip()
+        last_text = text
+        try:
+            return json.loads(text), text
+        except Exception:
+            append_jsonl(LOG_DIR / "grading.jsonl", {
+                "event": "grading_parse_failed",
+                "attempt": attempt,
+                "raw_text": text[:4000],
+                "model": DEFAULT_MODEL,
+                "ts": now_ms(),
+            })
+            if attempt >= 3:
+                return None, last_text
+    return None, last_text
 
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
     """OpenAIとの疎通を軽く確認（5分キャッシュ／対象モデルのみ）"""
@@ -810,53 +854,43 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def build_ask_ai_messages(message: str, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     ctx = context if isinstance(context, dict) else {}
-    ctx_lines: List[str] = []
-    key_labels = {
-        "question": "問題文",
-        "hint": "ヒント",
-        "rubric": "採点観点",
-        "student_answer": "ユーザー解答",
-        "grade_result": "採点結果",
-    }
-    for key, label in key_labels.items():
-        val = short_text(ctx.get(key, ""), 800)
-        if val:
-            ctx_lines.append(f"- {label}: {val}")
 
-    sysprompt = """あなたは「AI先生」です。中学生〜高校生に向けて、学校や塾の先生のように丁寧に解説します。
-口調はやさしく、結論だけで終わらせず「なぜそうなるか」「どう書けば点が取れるか」を必ず説明してください。
+    def ctx_text(key: str, limit: int = 1200) -> str:
+        val = ctx.get(key, "")
+        if isinstance(val, (dict, list)):
+            val = json.dumps(val, ensure_ascii=False)
+        return short_text(val, limit)
 
-【大原則】
+    question = ctx_text("question", 1200)
+    student_answer = ctx_text("student_answer", 1200)
+    rubric = ctx_text("rubric", 1200)
+    model_answer = ctx_text("model_answer", 1200) or ctx_text("hint", 1200)
+    grade_result = ctx_text("grade_result", 1200)
 
-* まずは生徒が自力で考えたことを尊重し、前向きに導く。
-* 断定しすぎず、必要なら最初に確認質問を1つだけする（曖昧なときのみ）。
-* ただの一般論ではなく、与えられた context（問題文/ヒント/採点観点/生徒解答/採点結果）を最優先で使う。
-* 個人情報（氏名・学校名など）は入力しないよう、返答の冒頭に1行だけ注意する。
+    sysprompt = """あなたは『AI先生』です。中高生向けに、やさしく正確に教える先生として解説してください。
 
-【出力フォーマット（必ずこの順で）】
+出力は必ず次の6項目をこの順で作成してください。
+①結論
+②理由/背景
+③具体例
+④解き方/手順
+⑤つまずきポイント
+⑥次の一手（短い課題）
 
-1. まず要点（1〜2行で結論）
-2. わかりやすい解説（3〜8行）：原因→理由→つながり
-3. 具体例（1つ）：短い例文・式・言い換えなど
-4. 書き方の型（テンプレ）：記述なら「結論→理由→根拠(具体例)」を基本に、字数内で書ける形にする
-5. 次の一手（箇条書きで1〜3個）：今日すぐ直せる行動にする
-6. 確認（短い質問を1つ）：理解チェック。「どこが一番引っかかった？」など
+制約:
+- context にある情報（問題文/生徒解答/採点観点/模範解答/採点結果）を優先して説明する。
+- 断定しすぎず、学習者の理解段階に合わせて1段ずつ説明する。
+- 日本語で、丁寧・簡潔に。
+- 個人情報の入力を求めない。"""
 
-【禁止】
-
-* 乱暴・極端に短い返答（2〜3行で終わらせない）
-* 「とにかく頑張れ」だけで終わる
-* contextを無視した一般論
-
-【contextの扱い（必須）】
-
-* /api/ask_ai の入力で context があれば、必ず文章内で参照して説明する（問題文に触れる、採点観点を使う等）
-* context が空なら、最初に確認質問を1つだけしてから解説する"""
-    user_prompt = f"質問: {message}\n"
-    if ctx_lines:
-        user_prompt += "\n参考文脈:\n" + "\n".join(ctx_lines)
-    else:
-        user_prompt += "\n参考文脈: （なし）\n※contextが空です。まず確認質問を1つだけしてから、解説を続けてください。"
+    user_prompt = (
+        f"質問: {message}\n\n"
+        f"問題文: {question or '（なし）'}\n"
+        f"生徒解答: {student_answer or '（なし）'}\n"
+        f"採点観点(rubric): {rubric or '（なし）'}\n"
+        f"模範解答: {model_answer or '（なし）'}\n"
+        f"採点結果: {grade_result or '（なし）'}"
+    )
     return [
         {"role": "system", "content": sysprompt},
         {"role": "user", "content": user_prompt},
@@ -1663,6 +1697,10 @@ def generate_question():
 # =========================
 # 採点 API
 # =========================
+# 手動テスト手順（0点固定再発防止チェック）
+# 1) Flask起動後、問題生成→解答→採点を10回繰り返す
+# 2) 同一問題でリライト→再採点を最低3回実施
+# 3) JSON解析失敗を疑う場合は logs/grading.jsonl に grading_parse_failed と raw_text が残ることを確認
 @app.post("/api/grade_answer")
 @require_access_code
 @rate_limit
@@ -1684,21 +1722,18 @@ def grade_answer():
         _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": "question と student_answer は必須です"}), 400
 
+    data["model_answer"] = resolve_model_answer(data)
     messages = build_grading_messages(data)
     try:
         # 用途: 採点（採点・講評・改善提案）
-        rsp = client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=MAX_TOKENS_GRADE,
-        )
-        text = (rsp.choices[0].message.content or "").strip()
+        result, _ = parse_grading_response_with_retry(messages)
     except Exception as e:
         _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
 
-    result = parse_first_json_block(text) or {}
+    if not isinstance(result, dict):
+        _update_metrics("grade", False, t0)
+        return jsonify({"ok": False, "error": "grading_parse_failed"}), 502
     try:
         score_total_raw = int(result.get("score_total", result.get("score", 0)))
     except Exception:
@@ -1762,7 +1797,7 @@ def grade_answer():
     max_score = difficulty_max_score(data["difficulty"])
     score_label = f"{max_score}点"
 
-    model_ans = (data.get("model_answer", "") or result.get("model_answer", "") or "").strip()
+    model_ans = (data.get("model_answer", "") or "").strip()
     full_score_example = (model_ans or result.get("full_score_example", "") or "").strip()
 
     if model_ans and is_high_match(data["student_answer"], model_ans, threshold=0.98):
@@ -1938,8 +1973,8 @@ def ask_ai():
         rsp = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=build_ask_ai_messages(message, context),
-            temperature=0.3,
-            max_tokens=MAX_TOKENS_ASK_AI,
+            temperature=0.2,
+            max_tokens=max(MAX_TOKENS_ASK_AI, 1200),
         )
         answer = normalize_text((rsp.choices[0].message.content or "").strip())
         if not answer:
