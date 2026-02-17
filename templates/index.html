@@ -1869,6 +1869,7 @@
         if(currentItem.grade) context.grade = currentItem.grade;
         if(currentItem.difficulty) context.difficulty = currentItem.difficulty;
         if(currentItem.question) context.question = currentItem.question.slice(0, 160);
+        if(currentItem.model_answer) context.model_answer = currentItem.model_answer.slice(0, 200);
       }
       if(lastGradeResult){
         const scoreTotal = lastGradeResult.score_total ?? lastGradeResult.score;
@@ -1957,6 +1958,10 @@
     }
 
     // ---- 採点 ----
+    // 手動確認メモ(README的):
+    // 1) 問題生成→解答→採点 を10回繰り返し、0点固定にならないことを確認
+    // 2) 同じ問題でリライト→再採点を最低3回実行
+    // 3) 失敗時はサーバの logs/grading.jsonl に raw_text が出ることを確認
     async function handleGrade(){
       if(!currentItem || !currentItem.question){
         toast('先に問題を選ぶか生成してください', false); return;
@@ -1974,7 +1979,8 @@
         assist_on: $('#assistToggle').checked,
         rewrite_count: rewriteCount,
         selected_full_score: $('#gradeDifficulty').value,
-        last10_scores: scoreHistory.map(s=>s.score)
+        last10_scores: scoreHistory.map(s=>s.score),
+        stock_id: currentItem.id || ""
       };
       if($('#includeModelForGrading').checked && currentItem.model_answer){
         body.model_answer = currentItem.model_answer;
@@ -1986,6 +1992,10 @@
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '採点中…';
       try{
         const r = await apiPost('/api/grade_answer', body);
+        if(!r || r.ok === false){
+          toast('採点に失敗しました。もう一度お試しください。', false);
+          return;
+        }
 
         if(r && r.rubric){
           renderRubric(r.rubric, r.rubric_hint);

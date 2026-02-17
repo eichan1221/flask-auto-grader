@@ -84,7 +84,7 @@ textarea{min-height:120px;resize:vertical}
 .qcard.mini{background:#fdf7ff}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
 .hint{background:#faf5ff;border:1px solid #eadcff;border-radius:12px;padding:10px}
-.toast{position:fixed;right:16px;bottom:calc(var(--action-bar-height) + 12px);background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s}
+.toast{position:fixed;right:16px;bottom:calc(var(--action-bar-height) + 12px);background:#111827;color:#fff;padding:10px 14px;border-radius:12px;opacity:0;transform:translateY(12px);transition:.25s;max-width:min(92vw,420px);line-height:1.5}
 .toast.show{opacity:1;transform:none}
 .danger{color:var(--err)}
 .success{color:var(--ok)}
