@@ -730,6 +730,51 @@ def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[O
                 return None, last_text
     return None, last_text
 
+
+def normalize_full_score_feedback(response: Dict[str, Any], max_score: int) -> Dict[str, Any]:
+    """満点時は改善系フィールドを無効化し、褒め中心の返却に正規化する。"""
+    score_total = int(response.get("score_total", response.get("score", 0)) or 0)
+    is_perfect = score_total >= int(max_score)
+    response["is_perfect_score"] = is_perfect
+
+    if not is_perfect:
+        response.setdefault("praise_headline", "")
+        response.setdefault("keep_doing", [])
+        response.setdefault("optional_challenge", "")
+        return response
+
+    praise = (
+        "これは満点！答案として完成しています"
+        if max_score >= 100 else
+        "これは満点！すばらしい答案です"
+    )
+    good_points = response.get("good_points", [])
+    if not isinstance(good_points, list):
+        good_points = [str(good_points)]
+    good_points = [normalize_text(str(x))[:120] for x in good_points if str(x).strip()]
+    while len(good_points) < 3:
+        fallback = [
+            "結論が明確で、問いへの答えがはっきり示せています",
+            "理由の筋道が通っていて、読み手が納得しやすいです",
+            "重要語句の使い方が適切で、表現が正確です",
+        ]
+        good_points.append(fallback[len(good_points)])
+
+    response["praise_headline"] = praise
+    response["good_points"] = good_points[:3]
+    response["rewrite_tip"] = ""
+    response["next_step"] = "改善は不要です。この調子を維持しましょう。"
+    response["next_steps"] = []
+    response["weak_tags"] = []
+    response["practice_menu"] = []
+    response["improvements"] = []
+    response["keep_doing"] = [
+        "結論→理由→具体例の順で書く型を次回も維持する",
+        "重要語句を1つ以上入れて、短く言い切る",
+    ]
+    response["optional_challenge"] = "余裕があれば、別の具体例でも同じ主張を説明してみよう。"
+    return response
+
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
     """OpenAIとの疎通を軽く確認（5分キャッシュ／対象モデルのみ）"""
     ttl_sec = 300
@@ -839,6 +884,7 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "next_step は「結論→理由→具体例1つ」で、30〜80字の1文にする。"
         "next_steps は1〜3個、達成条件付きの具体的な手順にする。"
         "practice_menu は1〜3個、すぐできる練習メニューにする。"
+        "score_total が配点上限に相当する満点の場合は、改善提案を出さず称賛のみを返す。"
         "日本語で丁寧かつ簡潔に。"
     )
     usr = (
@@ -1734,10 +1780,29 @@ def grade_answer():
     if not isinstance(result, dict):
         _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": "grading_parse_failed"}), 502
+    if "score_total" not in result and "score" not in result:
+        append_jsonl(LOG_DIR / "grading.jsonl", {
+            "event": "grading_invalid_schema",
+            "reason": "missing_score_total",
+            "result": result,
+            "model": DEFAULT_MODEL,
+            "ts": now_ms(),
+        })
+        _update_metrics("grade", False, t0)
+        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total が不足しています"}), 502
+
     try:
-        score_total_raw = int(result.get("score_total", result.get("score", 0)))
+        score_total_raw = int(result.get("score_total", result.get("score")))
     except Exception:
-        score_total_raw = 0
+        append_jsonl(LOG_DIR / "grading.jsonl", {
+            "event": "grading_invalid_schema",
+            "reason": "invalid_score_total",
+            "result": result,
+            "model": DEFAULT_MODEL,
+            "ts": now_ms(),
+        })
+        _update_metrics("grade", False, t0)
+        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total の形式が不正です"}), 502
     score_total_raw = max(0, min(10, score_total_raw))
 
     good_points = result.get("good_points", [])
@@ -1900,8 +1965,7 @@ def grade_answer():
         "ts": now_ms(),
     }
 
-    _update_metrics("grade", True, t0)
-    return jsonify({
+    response_payload = {
         "ok": True,
         "score": score_total_scaled,
         "score_total": score_total_scaled,
@@ -1936,7 +2000,16 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "model": DEFAULT_MODEL,
-    }), 200
+    }
+    response_payload = normalize_full_score_feedback(response_payload, max_score)
+
+    if response_payload.get("is_perfect_score"):
+        head = response_payload.get("praise_headline") or "🎉満点おめでとう！"
+        response_payload["commentary"] = f"{head}"
+        response_payload["short_comment"] = "改善は不要です。この完成度を次回も維持しましょう。"
+
+    _update_metrics("grade", True, t0)
+    return jsonify(response_payload), 200
 
 
 # =========================
