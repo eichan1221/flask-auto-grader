@@ -727,7 +727,10 @@
         <div class="pill" style="margin-bottom:8px"><input type="checkbox" id="aiTeacherUseContext" checked> この問題の文脈も一緒に送る</div>
         <div id="aiTeacherChat" class="ai-chat-log" aria-live="polite"></div>
         <div class="flex" style="justify-content:space-between;margin-top:10px">
-          <div class="small muted" id="aiTeacherStatus"></div>
+          <div>
+            <div class="small muted" id="aiTeacherStatus"></div>
+            <div class="small muted">※閉じると会話履歴はリセットされます</div>
+          </div>
           <button class="btn" id="btnAiTeacherClear" type="button">履歴クリア</button>
         </div>
         <div class="flex" style="margin-top:10px;align-items:flex-end">
@@ -1149,6 +1152,9 @@
     function closeModal(modalId, focusBackSelector){
       const m = document.getElementById(modalId);
       if(!m) return;
+      if(modalId === 'aiTeacherModal'){
+        resetAiTeacherState('');
+      }
       m.classList.remove('show');
       m.setAttribute('aria-hidden','true');
       if(focusBackSelector){
@@ -1177,11 +1183,10 @@
       if(status) status.textContent = '';
 
       const aiModal = document.getElementById('aiTeacherModal');
-      if(typeof openModal === 'function' && aiModal){
+      if(typeof openAiTeacher === 'function' && aiModal){
         closeModal('studyTipsModal');
-        openModal('aiTeacherModal', '#aiTeacherInput');
+        openAiTeacher();
         $('#aiTeacherStatus') && ($('#aiTeacherStatus').textContent = '勉強法モーダルから質問を開きました。');
-        renderAiTeacherMessages();
         return;
       }
 
@@ -1194,11 +1199,7 @@
 
       if(aiModal){
         closeModal('studyTipsModal');
-        aiModal.classList.add('show');
-        aiModal.style.display = 'flex';
-        aiModal.setAttribute('aria-hidden', 'false');
-        renderAiTeacherMessages();
-        setTimeout(()=>{ $('#aiTeacherInput')?.focus(); }, 0);
+        openAiTeacher();
         return;
       }
 
@@ -1281,13 +1282,10 @@
     }
 
     function openAiTeacher(){
-      const modal = $('#aiTeacherModal');
       const status = $('#aiTeacherStatus');
       if(status) status.textContent = '';
-      modal.classList.add('show');
-      modal.setAttribute('aria-hidden','false');
+      openModal('aiTeacherModal', '#aiTeacherInput');
       renderAiTeacherMessages();
-      setTimeout(()=>{ $('#aiTeacherInput')?.focus(); }, 0);
     }
 
     function resetAiTeacherState(statusMessage = ''){
@@ -1309,11 +1307,7 @@
     }
 
     function closeAiTeacher(){
-      const modal = $('#aiTeacherModal');
-      resetAiTeacherState('');
-      modal.classList.remove('show');
-      modal.setAttribute('aria-hidden','true');
-      setTimeout(()=>{ $('#btnAiTeacher')?.focus(); }, 0);
+      closeModal('aiTeacherModal', '#btnAiTeacher');
     }
 
     async function sendAiTeacherMessage(){
