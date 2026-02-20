@@ -124,7 +124,7 @@
               <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
             </div>
             <div class="flex" style="align-items:center">
-              <label class="pill"><input type="checkbox" id="includeHints"> ヒント（解説・出題意図）も生成に含める</label>
+              <label class="pill"><input type="checkbox" id="includeHints" checked> ヒント（解説・出題意図）も生成に含める</label>
             </div>
           </div>
         </details>
@@ -277,6 +277,14 @@
 
         <div class="qcard mini" id="historyCard" style="margin-top:12px">
           <div class="small muted">直近10回の学習ログ</div>
+          <div class="small muted">※この履歴はこの端末のブラウザに保存されます。閉じても残ります。</div>
+          <div class="history-controls">
+            <div style="flex:1;min-width:180px">
+              <label for="nicknameInput">学習者ニックネーム（任意）</label>
+              <input type="text" id="nicknameInput" placeholder="例: tester01" maxlength="24">
+            </div>
+            <button class="btn" id="btnResetHistory" type="button">学習ログをリセット</button>
+          </div>
           <div class="history-row" id="scoreHistory"></div>
           <div class="history-stats">
             <div>平均点（10点換算）: <span id="avgScore">-</span></div>
@@ -787,6 +795,30 @@
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
+    const ANON_USER_ID_KEY = 'anonUserId';
+    const NICKNAME_KEY = 'learnerNickname';
+
+
+    function ensureAnonUserId(){
+      let id = localStorage.getItem(ANON_USER_ID_KEY);
+      if(id) return id;
+      if(window.crypto && crypto.randomUUID){
+        id = crypto.randomUUID();
+      }else{
+        id = `anon-${Date.now()}-${Math.random().toString(16).slice(2,10)}`;
+      }
+      localStorage.setItem(ANON_USER_ID_KEY, id);
+      return id;
+    }
+
+    function getNickname(){
+      return ($('#nicknameInput')?.value || localStorage.getItem(NICKNAME_KEY) || '').trim();
+    }
+
+    function historyKey(base){
+      const nickname = getNickname();
+      return nickname ? `${base}:${nickname}` : base;
+    }
 
     function escapeHtml(s){
       return String(s ?? '')
@@ -916,7 +948,9 @@
 
     // ---- 共通Fetch ----
     async function apiGet(path){
-      const headers = {};
+      const headers = {'X-User-Id': ensureAnonUserId()};
+      const nickname = getNickname();
+      if(nickname) headers['X-User-Label'] = nickname;
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {headers});
       if(!res.ok){
@@ -937,7 +971,9 @@
     }
 
     async function apiPost(path, body){
-      const headers = {'Content-Type':'application/json'};
+      const headers = {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId()};
+      const nickname = getNickname();
+      if(nickname) headers['X-User-Label'] = nickname;
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {method:'POST', headers, body: JSON.stringify(body||{})});
       let data = null;
@@ -982,7 +1018,7 @@
     async function postFeedback(payload){
       const res = await fetch(cfg.endpoint('/feedback'), {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId(), ...(getNickname() ? {'X-User-Label': getNickname()} : {})},
         body: JSON.stringify(payload || {})
       });
       let data = null;
@@ -1353,8 +1389,9 @@
         if(status) status.textContent = '回答を受信しました。';
       }catch(e){
         document.getElementById('aiTeacherLoading')?.remove();
-        appendAiTeacherMessage('error', `送信に失敗しました（${e.message}）`);
-        if(status) status.textContent = `送信に失敗しました（${e.message}）`;
+        const quotaMsg = e.code === 'quota_exceeded' ? '本日のAI先生の利用上限に達しました。明日0時以降に再開できます。' : `送信に失敗しました（${e.message}）`;
+        appendAiTeacherMessage('error', quotaMsg);
+        if(status) status.textContent = quotaMsg;
       }finally{
         sendBtn.disabled = false;
       }
@@ -1362,7 +1399,12 @@
 
     // ---- 初期化 ----
     async function boot(){
+      ensureAnonUserId();
       loadSettings();
+      const nickInput = $('#nicknameInput');
+      if(nickInput){
+        nickInput.value = localStorage.getItem(NICKNAME_KEY) || '';
+      }
       updateFeedbackCount();
       updateCharCount();
       setAssistUI($('#assistToggle')?.checked);
@@ -1813,20 +1855,30 @@
 
     function loadHistory(){
       try{
-        scoreHistory = JSON.parse(localStorage.getItem('scoreHistory') || '[]');
+        scoreHistory = JSON.parse(localStorage.getItem(historyKey('scoreHistory')) || '[]');
       }catch(e){
         scoreHistory = [];
       }
       try{
-        rubricHistory = JSON.parse(localStorage.getItem('rubricHistory') || '[]');
+        rubricHistory = JSON.parse(localStorage.getItem(historyKey('rubricHistory')) || '[]');
       }catch(e){
         rubricHistory = [];
       }
     }
 
     function saveHistory(){
-      localStorage.setItem('scoreHistory', JSON.stringify(scoreHistory));
-      localStorage.setItem('rubricHistory', JSON.stringify(rubricHistory));
+      localStorage.setItem(historyKey('scoreHistory'), JSON.stringify(scoreHistory));
+      localStorage.setItem(historyKey('rubricHistory'), JSON.stringify(rubricHistory));
+    }
+
+    function resetHistory(){
+      const sKey = historyKey('scoreHistory');
+      const rKey = historyKey('rubricHistory');
+      scoreHistory = [];
+      rubricHistory = [];
+      localStorage.removeItem(sKey);
+      localStorage.removeItem(rKey);
+      updateHistoryUI();
     }
 
     function addHistoryEntry(score, max, rubric){
@@ -1945,6 +1997,9 @@
         context.last10_scores = scoreHistory.map(s=>s.score);
       }
       if(lastGradedAnswer) context.answer_length = lastGradedAnswer.length;
+      context.user_id = ensureAnonUserId();
+      const nick = getNickname();
+      if(nick) context.nickname = nick;
 
       try{
         if(status) status.textContent = '送信中...';
@@ -2008,7 +2063,12 @@
           type: 'feedback',
           role,
           email,
-          message
+          message,
+          context: {
+            user_id: ensureAnonUserId(),
+            nickname: getNickname() || '',
+            last10_scores: scoreHistory.map(s=>s.score)
+          }
         });
         localStorage.setItem('feedbackRole', role);
         toast('送信しました。ありがとうございます！');
@@ -2394,6 +2454,20 @@
       scrollToAnswer(true);
       toast('テンプレを挿入しました');
     };
+
+    $('#btnResetHistory').onclick = ()=>{
+      resetHistory();
+      toast('学習ログをリセットしました');
+    };
+
+    $('#nicknameInput').addEventListener('change', ()=>{
+      const name = getNickname();
+      localStorage.setItem(NICKNAME_KEY, name);
+      loadHistory();
+      updateHistoryUI();
+      refreshUsage();
+      toast(name ? `ニックネーム「${name}」で履歴を表示中` : '共通履歴キーに切り替えました');
+    });
 
     $('#studentAnswer').addEventListener('input', ()=>{
       updateCharCount();

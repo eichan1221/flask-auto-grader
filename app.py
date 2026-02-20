@@ -27,6 +27,7 @@ import shutil
 import zipfile
 import random
 import hmac
+import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
@@ -116,7 +117,7 @@ _rate_bucket: Dict[str, List[float]] = {}
 
 # 日次クォータ（将来の課金モデル用）
 # 0 以下なら「そのプランは無制限」
-FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "0"))  # 例: 5 にすると無料5回/日
+FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "0"))  # 0で無制限。本番公開は 20〜60/日 など推奨
 PRO_DAILY_LIMIT = int(os.getenv("PRO_DAILY_LIMIT", "0"))    # 例: 1000 にすると有料1000回/日
 DEFAULT_PLAN = (os.getenv("DEFAULT_PLAN") or "free").strip().lower()
 
@@ -463,6 +464,34 @@ def _strip_hints(item: Dict[str, Any]) -> Dict[str, Any]:
         item.pop(k, None)
     return item
 
+def _safe_answer_preview(text: str, prefix: int = 80) -> Dict[str, Any]:
+    norm = normalize_text(text)
+    n = len(norm)
+    if n == 0:
+        bucket = "0"
+    elif n <= 60:
+        bucket = "1-60"
+    elif n <= 120:
+        bucket = "61-120"
+    elif n <= 240:
+        bucket = "121-240"
+    else:
+        bucket = "241+"
+    return {
+        "length": n,
+        "length_bucket": bucket,
+        "prefix": norm[:prefix],
+        "sha256": hashlib.sha256(norm.encode("utf-8")).hexdigest(),
+    }
+
+def _sanitize_generation_log_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    keep = ("id", "source", "subject", "category", "domain", "grade", "unit", "difficulty", "max_points", "tags", "created_at")
+    sanitized = {k: item.get(k) for k in keep}
+    q_text = normalize_text(item.get("question", ""))
+    sanitized["question_length"] = len(q_text)
+    sanitized["question_preview"] = q_text[:120]
+    return sanitized
+
 def rate_limit(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -554,7 +583,7 @@ def _next_reset_iso() -> str:
 
 def enforce_quota(kind: str):
     """
-    kind: "generate" / "grade"
+    kind: "generate" / "grade" / "ai"
     FREE_DAILY_LIMIT / PRO_DAILY_LIMIT を超えた場合は 429 を返す。
     """
     def decorator(fn):
@@ -567,7 +596,7 @@ def enforce_quota(kind: str):
 
             user_key = _get_user_key()
             usage = _load_usage_for_today()
-            u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0}
+            u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0, "ai": 0}
 
             if u.get("total", 0) >= limit:
                 reset_at = _next_reset_iso()
@@ -596,6 +625,8 @@ def enforce_quota(kind: str):
                 u["generate"] = u.get("generate", 0) + 1
             elif kind == "grade":
                 u["grade"] = u.get("grade", 0) + 1
+            elif kind == "ai":
+                u["ai"] = u.get("ai", 0) + 1
             usage[user_key] = u
             _save_usage_for_today(usage)
 
@@ -643,7 +674,7 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     genre_hint = normalize_text(p.get("genre_hint", ""))[:120]
     avoid = normalize_text(p.get("avoid_topics", ""))[:120]
     length_hint = normalize_text(p.get("length_hint", "30〜80字程度"))[:40]
-    include_hints = bool(p.get("include_hints", False))
+    include_hints = bool(p.get("include_hints", True))
     return {
         "subject": subject,
         "category": category,
@@ -1255,7 +1286,7 @@ def api_usage():
     plan, limit = _plan_and_limit()
     usage = _load_usage_for_today()
     user_key = _get_user_key()
-    u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0}
+    u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0, "ai": 0}
     remaining = None
     if limit is not None:
         remaining = max(0, limit - u.get("total", 0))
@@ -1284,6 +1315,20 @@ def feedback():
     context = payload.get("context", None)
     if not isinstance(context, (dict, list, str)) and context is not None:
         context = str(context)
+
+    user_id = normalize_text(request.headers.get("X-User-Id", ""))[:80]
+    user_label = normalize_text(request.headers.get("X-User-Label", ""))[:40]
+    if isinstance(context, dict):
+        if user_id:
+            context["user_id"] = user_id
+        if user_label:
+            context["nickname"] = user_label
+    elif context is None:
+        context = {}
+        if user_id:
+            context["user_id"] = user_id
+        if user_label:
+            context["nickname"] = user_label
 
     continue_score = payload.get("continue_score", None)
     if continue_score is not None:
@@ -1786,7 +1831,7 @@ def generate_question():
         "created_at": now_ms(),
     }
     saved = save_stock_item(item)
-    append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": saved, "model": DEFAULT_MODEL, "ts": now_ms()})
+    append_jsonl(LOG_DIR / "generation.jsonl", {"event": "generated", "item": (saved if _is_teacher_request() else _sanitize_generation_log_item(saved)), "model": DEFAULT_MODEL, "ts": now_ms(), "teacher_request": _is_teacher_request(), "user_key": _get_user_key()})
 
     resp_item = dict(saved)
     if not payload["include_hints"]:
@@ -1966,11 +2011,24 @@ def grade_answer():
 
     prob = max(0, min(100, int(prob)))
 
-    append_jsonl(LOG_DIR / "grading.jsonl", {
+    teacher_request = _is_teacher_request()
+    stock_subject = ""
+    stock_category = ""
+    stock_id = data.get("stock_id", "")
+    if stock_id:
+        stock = load_stock_item(STOCK_DIR / f"{stock_id}.json") or {}
+        if isinstance(stock, dict):
+            stock_subject = normalize_text(stock.get("subject", ""))[:20]
+            stock_category = normalize_text(stock.get("category", ""))[:20]
+
+    graded_log = {
         "event": "graded",
-        "question": data["question"],
-        "student_answer": data["student_answer"],
+        "teacher_request": teacher_request,
+        "user_key": _get_user_key(),
+        "subject": stock_subject,
+        "category": stock_category,
         "score": score_total_scaled,
+        "max_points": max_score,
         "perfect_probability": prob,
         "assist_on": data.get("assist_on", False),
         "rewrite_count": data.get("rewrite_count", 0),
@@ -1979,7 +2037,15 @@ def grade_answer():
         "answer_length": answer_length,
         "model": DEFAULT_MODEL,
         "ts": now_ms()
-    })
+    }
+    if teacher_request:
+        graded_log["question"] = data["question"]
+        graded_log["student_answer"] = data["student_answer"]
+    else:
+        graded_log["question_preview"] = normalize_text(data["question"])[:120]
+        graded_log["student_answer_meta"] = _safe_answer_preview(data["student_answer"])
+
+    append_jsonl(LOG_DIR / "grading.jsonl", graded_log)
 
     prev = session.get("last_result") or {}
     improvements: List[str] = []
@@ -2074,6 +2140,7 @@ def grade_answer():
 @app.post("/api/ask_ai")
 @require_access_code
 @rate_limit
+@enforce_quota("ai")
 def ask_ai():
     if not request.is_json:
         return jsonify({"ok": False, "error": "invalid_content_type", "detail": "Content-Type must be application/json"}), 400
