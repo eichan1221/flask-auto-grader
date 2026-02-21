@@ -127,7 +127,7 @@ ALLOWED_CAT_BY_SUBJECT = {
     "理科": {"生物", "化学", "地学", "物理", "天体"},
 }
 ALLOWED_GRADES = {"中1", "中2", "中3"}
-ALLOWED_DIFFICULTY = {"5点", "10点", "満点"}  # 生成時の難易度ヒント用（採点はUI側で配点表示）
+ALLOWED_DIFFICULTY = {"10点", "満点"}  # 生成/採点は10点・100点のみ
 
 # メトリクス
 METRICS = {
@@ -360,8 +360,6 @@ def ensure_openai() -> Optional[str]:
     return None
 
 def difficulty_max_score(difficulty: str) -> int:
-    if difficulty == "5点":
-        return 5
     if difficulty == "満点":
         return 100
     return 10
@@ -713,7 +711,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         requested_max_score = int(requested_max_score)
     except Exception:
         requested_max_score = None
-    if requested_max_score not in {5, 10, 100}:
+    if requested_max_score not in {10, 100}:
         requested_max_score = difficulty_max_score(difficulty)
     assist_on = bool(p.get("assist_on", False))
     try:
@@ -784,8 +782,8 @@ def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[O
 
 
 def normalize_score_value(score_raw: Any, requested_max_score: int) -> Tuple[Optional[int], Optional[int], str]:
-    """score_rawを受け取り、5/10/100いずれかの配点に正規化する。"""
-    if requested_max_score not in {5, 10, 100}:
+    """score_rawを受け取り、10/100の配点に正規化する。"""
+    if requested_max_score not in {10, 100}:
         return None, None, "unsupported_max_score"
     try:
         score_num = float(score_raw)
@@ -1916,6 +1914,19 @@ def grade_answer():
         return jsonify({"error": "Content-Type must be application/json"}), 415
 
     data_in = request.get_json(force=True, silent=True) or {}
+    requested_max_raw = data_in.get("max_score", data_in.get("max_points"))
+    try:
+        requested_max_int = int(requested_max_raw) if requested_max_raw is not None else None
+    except Exception:
+        requested_max_int = None
+    if requested_max_int == 5:
+        _update_metrics("grade", False, t0)
+        return jsonify({
+            "ok": False,
+            "error": "unsupported_max_score",
+            "message": "5点配点は現在利用できません。10点または100点を選択してください。"
+        }), 400
+
     data = validate_grading_payload(data_in)
 
     if not data["question"] or not data["student_answer"]:
@@ -2002,7 +2013,7 @@ def grade_answer():
     rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
 
     max_score = int(data.get("max_points") or difficulty_max_score(data["difficulty"]))
-    if max_score not in {5, 10, 100}:
+    if max_score not in {10, 100}:
         max_score = difficulty_max_score(data["difficulty"])
     score_label = f"{max_score}点"
 

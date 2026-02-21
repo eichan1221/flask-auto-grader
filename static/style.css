@@ -232,6 +232,34 @@ textarea{min-height:120px;resize:vertical}
   outline:3px solid rgba(168,85,247,0.35);
   outline-offset:2px;
 }
+
+
+.purpose-card{
+  margin-bottom:12px;
+  border:1px solid #e9d5ff;
+  border-radius:16px;
+  background:linear-gradient(180deg,#fff7ff,#f5f3ff);
+  padding:14px 16px;
+  box-shadow:0 8px 22px rgba(168,85,247,0.14);
+}
+.purpose-card h2{
+  margin:0 0 8px;
+  font-size:18px;
+  color:#5b21b6;
+}
+.purpose-card p{
+  margin:0;
+  line-height:1.9;
+  font-size:14px;
+}
+.purpose-modal-body{
+  display:grid;
+  gap:10px;
+  line-height:1.9;
+  font-size:14px;
+}
+.purpose-modal-body p{margin:0}
+
 .callout{
   background:linear-gradient(180deg,#fff7ff,#f5fbff);
   border:1px solid var(--border);

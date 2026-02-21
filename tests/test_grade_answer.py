@@ -9,12 +9,15 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.client = grader_app.app.test_client()
         grader_app.app.config["TESTING"] = True
 
-    def _payload(self, difficulty: str = "10点"):
-        return {
+    def _payload(self, difficulty: str = "10点", max_score=None):
+        payload = {
             "question": "鎌倉幕府が成立した理由を説明しなさい。",
             "student_answer": "武士が力を持ち、源頼朝が政治の中心を鎌倉に置いたから。",
             "difficulty": difficulty,
         }
+        if max_score is not None:
+            payload["max_score"] = max_score
+        return payload
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
@@ -71,7 +74,7 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
     @patch("app.parse_grading_response_with_retry")
-    def test_perfect_score_detected_for_all_max_points(self, mock_parse, *_):
+    def test_perfect_score_detected_for_supported_max_points(self, mock_parse, *_):
         mock_parse.return_value = ({
             "score_total": 10,
             "good_points": ["良い", "良い", "良い"],
@@ -81,13 +84,22 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
             "rubric": {"conclusion": 3, "logic": 3, "wording": 3},
         }, "")
 
-        for difficulty, expected in (("5点", 5), ("10点", 10), ("満点", 100)):
+        for difficulty, expected in (("10点", 10), ("満点", 100)):
             res = self.client.post("/api/grade_answer", json=self._payload(difficulty))
             self.assertEqual(res.status_code, 200)
             body = res.get_json()
             self.assertEqual(body["max_score"], expected)
             self.assertEqual(body["score_total"], expected)
             self.assertTrue(body["is_perfect_score"])
+
+    @patch("app.ensure_openai", return_value=None)
+    def test_rejects_five_point_max_score(self, *_):
+        res = self.client.post("/api/grade_answer", json=self._payload("10点", max_score=5))
+        self.assertEqual(res.status_code, 400)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"], "unsupported_max_score")
+        self.assertIn("5点配点は現在利用できません", body["message"])
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")

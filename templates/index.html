@@ -23,6 +23,7 @@
 
         <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
         <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
+        <button class="btn" id="btnPurpose" title="このアプリの目的を開く">このアプリの目的</button>
         <button class="btn" id="btnStudyTips" title="勉強法のコツを開く">
           <span class="study-tips-icon" aria-hidden="true">✨</span>
           <span>これをすれば成績が上がる勉強法！</span>
@@ -36,6 +37,12 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
+
+    <section class="purpose-card" aria-labelledby="purposeLeadTitle">
+      <h2 id="purposeLeadTitle">この記述トレーナーの目的</h2>
+      <p>この記述トレーナーは、社会や理科で出てくる用語や出来事の流れを、<strong>「説明できるレベル」まで理解すること</strong>を目的とした学習アプリです。<br>
+      単語を覚えるだけで終わらず、意味・背景・つながりまで理解することで、得点力だけでなく、読解力や本質的な理解を育てます。</p>
+    </section>
 
     <!-- 設定 -->
     <div class="card" id="settingsCard" style="display:none">
@@ -104,7 +111,6 @@
           <div>
             <label>難易度/配点</label>
             <select id="difficulty">
-              <option>5点</option>
               <option selected>10点</option>
               <option>満点</option>
             </select>
@@ -267,7 +273,6 @@
         </div>
         <div class="flex" style="margin-top:10px">
           <select id="gradeDifficulty">
-            <option>5点</option>
             <option selected>10点</option>
             <option>満点</option>
           </select>
@@ -456,7 +461,7 @@
           <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
           <ul style="margin:0;padding-left:18px;line-height:1.8">
             <li><b>出題（記述問題）の自動生成</b>：社会/理科の記述問題を、入試・定期テスト想定で作れます。</li>
-            <li><b>採点（5点/10点/満点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答（採点後のみ）を返します。</li>
+            <li><b>採点（10点/100点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答（採点後のみ）を返します。</li>
             <li><b>ストック保存</b>：生成した問題を最大10件まで保存し、あとで呼び出して使えます。</li>
             <li><b>エクスポート</b>：stocks / grading のデータを書き出し、バックアップや共有に使えます。</li>
           </ul>
@@ -523,7 +528,7 @@
         <div>
           <div class="caps">よくある使い方（例）</div>
           <ul style="margin-top:8px;padding-left:18px;line-height:1.8">
-            <li>小テスト用に<strong>難易度=5点</strong>で10問生成 → ストックから当日使う。</li>
+            <li>小テスト用に<strong>難易度=10点</strong>で10問生成 → ストックから当日使う。</li>
             <li>定期テスト対策で<strong>満点</strong>にして記述量を増やす。</li>
             <li>「単元」や「避ける話題」に既習内容を入れて、被りを防ぐ。</li>
           </ul>
@@ -540,6 +545,28 @@
           </ul>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="purposeModal" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="purposeTitle">
+      <div class="panelHeader">
+        <div>
+          <h2 class="panelTitle" id="purposeTitle">この記述トレーナーの目的</h2>
+        </div>
+        <div class="flex" style="gap:8px">
+          <button class="btn" id="btnPurposeClose" aria-label="このアプリの目的モーダルを閉じる">閉じる</button>
+        </div>
+      </div>
+      <div class="panelBody purpose-modal-body">
+        <p>この記述トレーナーは、社会や理科で学ぶ用語や出来事の流れについて、<strong>理解を深めること</strong>を目的としています。</p>
+        <p>理科や社会を一生懸命勉強しているのに伸び悩んでしまう原因の一つは、<strong>「単語を覚えるだけ」で止まってしまうこと</strong>です。<br>
+        本当に力をつけるためには、その用語が何を意味しているのか、なぜそのような現象や出来事が起こるのか、どのような背景やつながりがあるのかまで理解することが大切です。</p>
+        <p>このアプリでは、用語を自分の言葉で説明する練習を通して、知識を「暗記」から「理解」へ変えていきます。<br>
+        はじめは抽象的で難しく感じるかもしれませんが、そのときは模範解答を見たり、AI先生に質問したりしながら、何度も記述に取り組んでみてください。</p>
+        <p>繰り返し練習することで、得点につながるだけでなく、読解力や考える力などの本質的な力も身についていきます。<br>
+        焦らず、少しずつ力を伸ばしていきましょう。</p>
       </div>
     </div>
   </div>
@@ -643,7 +670,6 @@
           <div>
             <label>配点</label>
             <select id="stockDifficulty">
-              <option>5点</option>
               <option selected>10点</option>
               <option>満点</option>
             </select>
@@ -879,13 +905,11 @@
     }
 
     function difficultyToMaxPoints(difficulty){
-      if(difficulty === '5点') return 5;
       if(difficulty === '満点') return 100;
       return 10;
     }
 
     function maxPointsToDifficulty(maxPoints){
-      if(Number(maxPoints) === 5) return '5点';
       if(Number(maxPoints) === 100) return '満点';
       return '10点';
     }
@@ -1210,6 +1234,14 @@
 
     function closeHowto(){
       closeModal('howtoModal', '#btnHowto');
+    }
+
+    function openPurpose(){
+      openModal('purposeModal', '#btnPurposeClose');
+    }
+
+    function closePurpose(){
+      closeModal('purposeModal', '#btnPurpose');
     }
 
     function openStudyTips(){
@@ -2376,6 +2408,12 @@
       if(e.target === e.currentTarget) closeHowto();
     });
 
+    $('#btnPurpose')?.addEventListener('click', openPurpose);
+    $('#btnPurposeClose')?.addEventListener('click', closePurpose);
+    $('#purposeModal')?.addEventListener('click', (e)=>{
+      if(e.target === e.currentTarget) closePurpose();
+    });
+
     $('#btnStudyTips')?.addEventListener('click', openStudyTips);
     $('#btnStudyTipsClose')?.addEventListener('click', closeStudyTips);
     $('#btnStudyTipsCloseX')?.addEventListener('click', closeStudyTips);
@@ -2483,12 +2521,14 @@
 
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
+      const purpose = $('#purposeModal');
       const studyTips = $('#studyTipsModal');
       const fb = $('#feedbackModal');
       const stock = $('#stockModal');
       const ai = $('#aiTeacherModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
+        if(purpose && purpose.classList.contains('show')) closePurpose();
         if(studyTips && studyTips.classList.contains('show')) closeStudyTips();
         if(fb && fb.classList.contains('show')) closeFeedback();
         if(stock && stock.classList.contains('show')) closeStockModal();
