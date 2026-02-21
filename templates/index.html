@@ -16,7 +16,10 @@
         <span id="modelTag" class="tag" aria-hidden="true">model: ...</span>
       </div>
       <div class="flex" style="gap:8px;align-items:center">
-        <span id="usageBadge" class="pill small" aria-live="polite"></span>
+        <div id="usageBadge" class="usage-badges" aria-live="polite">
+          <span id="mainUsageBadge" class="pill small usage-pill">本編：あと --回</span>
+          <span id="aiUsageBadge" class="pill small usage-pill">AI先生：あと --回</span>
+        </div>
 
         <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
         <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
@@ -984,9 +987,10 @@
       }
       if(!res.ok){
         if(res.status === 429 && data && data.error === 'quota_exceeded'){
-          const err = new Error(data.message || '無料プランの1日あたりの利用回数を超えています。');
+          const err = new Error(data.message || '本日の利用上限に達しました。');
           err.code = 'quota_exceeded';
           err.status = 429;
+          err.scope = data.scope || '';
           throw err;
         }
         if(res.status === 403){
@@ -1143,22 +1147,24 @@
 
     // ---- 利用状況バッジ ----
     async function refreshUsage(){
-      const badge = $('#usageBadge');
-      if(!badge) return;
+      const mainBadge = $('#mainUsageBadge');
+      const aiBadge = $('#aiUsageBadge');
+      if(!mainBadge || !aiBadge) return;
       try{
         const r = await apiGet('/api/usage');
         if(!r || !r.ok){
-          badge.textContent = '';
           return;
         }
-        const limit = r.limit;
-        const usage = r.usage || {};
-        const total = usage.total ?? 0;
-        if(limit == null){
-          badge.textContent = `本日の利用: ${total} 回（制限なし）`;
-        }else{
-          badge.textContent = `本日の利用: ${total} / ${limit} 回`;
-        }
+        const limits = r.limits || {};
+        const rem = r.remaining || {};
+        const mainLimit = Number(limits.main ?? 20);
+        const aiLimit = Number(limits.ai ?? 5);
+        const mainRem = Number(rem.main ?? mainLimit);
+        const aiRem = Number(rem.ai ?? aiLimit);
+        mainBadge.textContent = `今日の本編残り：${mainRem}回`;
+        aiBadge.textContent = `今日のAI先生残り：${aiRem}回`;
+        mainBadge.classList.toggle('limit-reached', mainRem <= 0);
+        aiBadge.classList.toggle('limit-reached', aiRem <= 0);
       }catch(e){}
     }
 
@@ -1389,11 +1395,12 @@
         if(status) status.textContent = '回答を受信しました。';
       }catch(e){
         document.getElementById('aiTeacherLoading')?.remove();
-        const quotaMsg = e.code === 'quota_exceeded' ? '本日のAI先生の利用上限に達しました。明日0時以降に再開できます。' : `送信に失敗しました（${e.message}）`;
+        const quotaMsg = e.code === 'quota_exceeded' ? (e.message || '本日のAI先生の利用上限に達しました。明日0時以降に再開できます。') : `送信に失敗しました（${e.message}）`;
         appendAiTeacherMessage('error', quotaMsg);
         if(status) status.textContent = quotaMsg;
       }finally{
         sendBtn.disabled = false;
+        refreshUsage();
       }
     }
 
@@ -1496,7 +1503,7 @@
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
-          toast(e.message || '無料プランの1日あたりの利用回数を超えました', false);
+          toast(e.message || '本日の本編利用上限に達しました。明日リセットされます。', false);
         }else{
           toast('生成に失敗しました: ' + e.message, false);
         }
@@ -2100,6 +2107,7 @@
         student_answer: $('#studentAnswer').value || '',
         difficulty: $('#gradeDifficulty').value,
         max_points: difficultyToMaxPoints($('#gradeDifficulty').value),
+        max_score: difficultyToMaxPoints($('#gradeDifficulty').value),
         assist_on: $('#assistToggle').checked,
         rewrite_count: rewriteCount,
         selected_full_score: $('#gradeDifficulty').value,
@@ -2225,7 +2233,7 @@
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
-          toast(e.message || '無料プランの1日あたりの利用回数を超えました', false);
+          toast(e.message || '本日の本編利用上限に達しました。明日リセットされます。', false);
         }else{
           toast('採点に失敗しました: ' + e.message, false);
         }

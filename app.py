@@ -12,7 +12,7 @@
 # - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
 # - 追加: /api/stock/clear /api/stock/import /logs.zip /status に OpenAI 疎通
 # - 新規: /api/stock/search /api/stock/random /api/model(POST) / NOVELTY_THRESHOLD / MAX_TOKENS_*
-# - 将来課金用: 日次クォータ（FREE_DAILY_LIMIT / PRO_DAILY_LIMIT, /api/usage）
+# - 日次クォータ（本編20回 / AI先生5回, /api/usage）
 # - 注意: UI 側の fetch は /api/* を呼び出す想定（HTMLは変更不要）
 
 import os
@@ -34,7 +34,7 @@ from functools import wraps
 from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta  # ← timedelta を追加
 
-from flask import Flask, request, jsonify, send_file, render_template, session
+from flask import Flask, request, jsonify, send_file, render_template, session, make_response
 from flask_cors import CORS
 
 # --- OpenAI (v1 SDK) ---
@@ -115,11 +115,9 @@ AI_CHAT_HISTORY_MAX_CHARS = int(os.getenv("AI_CHAT_HISTORY_MAX_CHARS", "500"))
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 _rate_bucket: Dict[str, List[float]] = {}
 
-# 日次クォータ（将来の課金モデル用）
-# 0 以下なら「そのプランは無制限」
-FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "0"))  # 0で無制限。本番公開は 20〜60/日 など推奨
-PRO_DAILY_LIMIT = int(os.getenv("PRO_DAILY_LIMIT", "0"))    # 例: 1000 にすると有料1000回/日
-DEFAULT_PLAN = (os.getenv("DEFAULT_PLAN") or "free").strip().lower()
+# 無課金向け日次制限（サーバー時刻/JST基準）
+FREE_DAILY_MAIN_LIMIT = int(os.getenv("FREE_DAILY_MAIN_LIMIT", "20"))
+FREE_DAILY_AI_LIMIT = int(os.getenv("FREE_DAILY_AI_LIMIT", "5"))
 
 # 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
@@ -525,8 +523,9 @@ def _update_metrics(kind: str, ok: bool, t0: float):
 # 日次クォータ関連（将来課金モデル用）
 # =========================
 def _today_key() -> str:
-    # サーバーローカルタイムの YYYYMMDD を使う
-    return datetime.now().astimezone().strftime("%Y%m%d")
+    # JST日付で日次リセット（運用が日本前提のため）
+    jst = timezone(timedelta(hours=9))
+    return datetime.now(jst).strftime("%Y%m%d")
 
 def _usage_file_for_today() -> Path:
     return USAGE_DIR / f"{_today_key()}.json"
@@ -554,92 +553,105 @@ def _get_user_key() -> str:
     uid = normalize_text(uid)
     return uid or "anonymous"
 
-def _plan_and_limit() -> Tuple[str, Optional[int]]:
-    """
-    現時点では:
-      - X-User-Plan ヘッダー or Cookie(user_plan) or DEFAULT_PLAN をプラン名として採用
-      - free → FREE_DAILY_LIMIT
-      - pro  → PRO_DAILY_LIMIT
-    0 以下の値なら「そのプランは無制限」として扱う。
-    """
-    plan = (
-        (request.headers.get("X-User-Plan") or "")
-        or (request.cookies.get("user_plan") or "")
-        or DEFAULT_PLAN
-    ).strip().lower() or "free"
-    if plan == "pro":
-        limit = PRO_DAILY_LIMIT
-    else:
-        limit = FREE_DAILY_LIMIT
-    if limit <= 0:
-        return plan, None  # 無制限
-    return plan, limit
+def _empty_usage() -> Dict[str, int]:
+    return {
+        "total": 0,
+        "main": 0,
+        "ai": 0,
+        "generate": 0,
+        "grade": 0,
+    }
+
+
+def _usage_bucket(kind: str) -> str:
+    return "ai" if kind == "ai" else "main"
+
+
+def _usage_limits() -> Dict[str, int]:
+    return {
+        "main": max(0, FREE_DAILY_MAIN_LIMIT),
+        "ai": max(0, FREE_DAILY_AI_LIMIT),
+    }
 
 def _next_reset_iso() -> str:
-    # 次の0時（サーバータイム）のISO文字列
-    now = datetime.now().astimezone()
+    # 次の0時（JST）のISO文字列
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return tomorrow.isoformat()
+
+
+def _is_success_response(resp) -> bool:
+    if resp.status_code >= 400:
+        return False
+    payload = resp.get_json(silent=True)
+    return isinstance(payload, dict) and payload.get("ok") is True
 
 def enforce_quota(kind: str):
     """
     kind: "generate" / "grade" / "ai"
-    FREE_DAILY_LIMIT / PRO_DAILY_LIMIT を超えた場合は 429 を返す。
+    上限超過時は 429。ok:true のレスポンス時のみ消費する。
     """
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            plan, limit = _plan_and_limit()
-            # 無制限プランならそのまま通す
-            if limit is None:
-                return fn(*args, **kwargs)
-
             user_key = _get_user_key()
             usage = _load_usage_for_today()
-            u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0, "ai": 0}
+            u = usage.get(user_key) or _empty_usage()
+            limits = _usage_limits()
+            bucket = _usage_bucket(kind)
+            bucket_limit = limits[bucket]
+            bucket_used = int(u.get(bucket, 0))
 
-            if u.get("total", 0) >= limit:
+            if bucket_limit > 0 and bucket_used >= bucket_limit:
                 reset_at = _next_reset_iso()
+                scope_label = "AI先生" if bucket == "ai" else "本編"
                 payload = {
                     "ok": False,
                     "error": "quota_exceeded",
-                    "message": "無料プランの1日あたりの利用回数を超えています。",
-                    "plan": plan,
-                    "limit": limit,
-                    "total": u.get("total", 0),
+                    "scope": bucket,
+                    "message": f"本日の{scope_label}利用回数の上限（{bucket_limit}回）に達しました。明日またご利用ください。",
+                    "limit": bucket_limit,
+                    "used": bucket_used,
                     "reset_at": reset_at,
+                    "usage": {
+                        "main": int(u.get("main", 0)),
+                        "ai": int(u.get("ai", 0)),
+                    },
+                    "remaining": {
+                        "main": max(0, limits["main"] - int(u.get("main", 0))),
+                        "ai": max(0, limits["ai"] - int(u.get("ai", 0))),
+                    },
                 }
                 append_jsonl(LOG_DIR / "usage.jsonl", {
                     "event": "quota_exceeded",
                     "user_key": user_key,
-                    "plan": plan,
-                    "limit": limit,
+                    "scope": bucket,
+                    "limit": bucket_limit,
                     "usage": u,
                     "ts": now_ms(),
                 })
                 return jsonify(payload), 429
 
-            # まだ上限未満ならカウントをインクリメントして続行
-            u["total"] = u.get("total", 0) + 1
-            if kind == "generate":
-                u["generate"] = u.get("generate", 0) + 1
-            elif kind == "grade":
-                u["grade"] = u.get("grade", 0) + 1
-            elif kind == "ai":
-                u["ai"] = u.get("ai", 0) + 1
-            usage[user_key] = u
-            _save_usage_for_today(usage)
+            resp = make_response(fn(*args, **kwargs))
+            if _is_success_response(resp):
+                u["total"] = int(u.get("total", 0)) + 1
+                u[bucket] = int(u.get(bucket, 0)) + 1
+                if kind in {"generate", "grade"}:
+                    u[kind] = int(u.get(kind, 0)) + 1
+                usage[user_key] = u
+                _save_usage_for_today(usage)
 
-            append_jsonl(LOG_DIR / "usage.jsonl", {
-                "event": "quota_used",
-                "user_key": user_key,
-                "plan": plan,
-                "kind": kind,
-                "limit": limit,
-                "usage": u,
-                "ts": now_ms(),
-            })
-            return fn(*args, **kwargs)
+                append_jsonl(LOG_DIR / "usage.jsonl", {
+                    "event": "quota_used",
+                    "user_key": user_key,
+                    "kind": kind,
+                    "scope": bucket,
+                    "limit": bucket_limit,
+                    "usage": u,
+                    "ts": now_ms(),
+                })
+            return resp
         return wrapper
     return decorator
 
@@ -696,6 +708,13 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     difficulty = p.get("difficulty", "10点")
     if difficulty not in ALLOWED_DIFFICULTY:
         difficulty = "10点"
+    requested_max_score = p.get("max_score", p.get("max_points"))
+    try:
+        requested_max_score = int(requested_max_score)
+    except Exception:
+        requested_max_score = None
+    if requested_max_score not in {5, 10, 100}:
+        requested_max_score = difficulty_max_score(difficulty)
     assist_on = bool(p.get("assist_on", False))
     try:
         rewrite_count = int(p.get("rewrite_count", 0))
@@ -713,7 +732,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "student_answer": student_answer,
         "model_answer": model_answer,
         "difficulty": difficulty,
-        "max_points": difficulty_max_score(difficulty),
+        "max_points": requested_max_score,
         "assist_on": assist_on,
         "rewrite_count": rewrite_count,
         "selected_full_score": selected_full_score,
@@ -762,6 +781,36 @@ def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[O
             if attempt >= 3:
                 return None, last_text
     return None, last_text
+
+
+def normalize_score_value(score_raw: Any, requested_max_score: int) -> Tuple[Optional[int], Optional[int], str]:
+    """score_rawを受け取り、5/10/100いずれかの配点に正規化する。"""
+    if requested_max_score not in {5, 10, 100}:
+        return None, None, "unsupported_max_score"
+    try:
+        score_num = float(score_raw)
+    except Exception:
+        return None, None, "invalid_score"
+
+    if score_num < 0:
+        return None, None, "negative_score"
+
+    # モデルが10点基準を返すことがあるため、配点を見て換算する
+    if score_num <= 10:
+        if requested_max_score == 10:
+            normalized = int(round(score_num))
+        else:
+            normalized = int(round(score_num * requested_max_score / 10))
+    elif score_num <= requested_max_score:
+        normalized = int(round(score_num))
+    elif score_num <= 100:
+        normalized = int(round(score_num * requested_max_score / 100))
+    else:
+        return None, None, "score_out_of_range"
+
+    normalized = max(0, min(requested_max_score, normalized))
+    base10 = int(round(normalized * 10 / requested_max_score))
+    return normalized, base10, "ok"
 
 
 def normalize_full_score_feedback(response: Dict[str, Any], max_score: int) -> Dict[str, Any]:
@@ -1227,9 +1276,8 @@ def status():
         "novelty_threshold": NOVELTY_THRESHOLD,
         "max_stock": MAX_STOCK,
         "quota": {
-            "free_daily_limit": FREE_DAILY_LIMIT,
-            "pro_daily_limit": PRO_DAILY_LIMIT,
-            "default_plan": DEFAULT_PLAN,
+            "free_daily_main_limit": FREE_DAILY_MAIN_LIMIT,
+            "free_daily_ai_limit": FREE_DAILY_AI_LIMIT,
         },
         "codes": {
             "ACCESS_CODE": preview(ACCESS_CODE),
@@ -1255,9 +1303,8 @@ def env_check():
         "RELEASE": RELEASE or "NOT SET",
         "MAX_TOKENS_GEN": MAX_TOKENS_GEN,
         "MAX_TOKENS_GRADE": MAX_TOKENS_GRADE,
-        "FREE_DAILY_LIMIT": FREE_DAILY_LIMIT,
-        "PRO_DAILY_LIMIT": PRO_DAILY_LIMIT,
-        "DEFAULT_PLAN": DEFAULT_PLAN,
+        "FREE_DAILY_MAIN_LIMIT": FREE_DAILY_MAIN_LIMIT,
+        "FREE_DAILY_AI_LIMIT": FREE_DAILY_AI_LIMIT,
     }), 200
 
 @app.post("/_probe-write")
@@ -1283,18 +1330,24 @@ def auth():
 # ---- 日次クォータの確認用API（UIからはまだ未使用）----
 @app.get("/api/usage")
 def api_usage():
-    plan, limit = _plan_and_limit()
     usage = _load_usage_for_today()
     user_key = _get_user_key()
-    u = usage.get(user_key) or {"total": 0, "generate": 0, "grade": 0, "ai": 0}
-    remaining = None
-    if limit is not None:
-        remaining = max(0, limit - u.get("total", 0))
+    u = usage.get(user_key) or _empty_usage()
+    limits = _usage_limits()
+    remaining = {
+        "main": max(0, limits["main"] - int(u.get("main", 0))),
+        "ai": max(0, limits["ai"] - int(u.get("ai", 0))),
+    }
     return jsonify({
         "ok": True,
-        "plan": plan,
-        "limit": limit,
-        "usage": u,
+        "limits": limits,
+        "usage": {
+            "total": int(u.get("total", 0)),
+            "main": int(u.get("main", 0)),
+            "ai": int(u.get("ai", 0)),
+            "generate": int(u.get("generate", 0)),
+            "grade": int(u.get("grade", 0)),
+        },
         "remaining": remaining,
         "reset_at": _next_reset_iso(),
     }), 200
@@ -1892,19 +1945,7 @@ def grade_answer():
         _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total が不足しています"}), 502
 
-    try:
-        score_total_raw = int(result.get("score_total", result.get("score")))
-    except Exception:
-        append_jsonl(LOG_DIR / "grading.jsonl", {
-            "event": "grading_invalid_schema",
-            "reason": "invalid_score_total",
-            "result": result,
-            "model": DEFAULT_MODEL,
-            "ts": now_ms(),
-        })
-        _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total の形式が不正です"}), 502
-    score_total_raw = max(0, min(10, score_total_raw))
+    score_total_raw = result.get("score_total", result.get("score"))
 
     good_points = result.get("good_points", [])
     if not isinstance(good_points, list):
@@ -1960,17 +2001,30 @@ def grade_answer():
     short_comment = (result.get("short_comment", "") or "").strip()
     rewrite_tip = (result.get("rewrite_tip", "") or "").strip()
 
-    max_score = difficulty_max_score(data["difficulty"])
+    max_score = int(data.get("max_points") or difficulty_max_score(data["difficulty"]))
+    if max_score not in {5, 10, 100}:
+        max_score = difficulty_max_score(data["difficulty"])
     score_label = f"{max_score}点"
 
     model_ans = (data.get("model_answer", "") or "").strip()
     full_score_example = (model_ans or result.get("full_score_example", "") or "").strip()
 
     if model_ans and is_high_match(data["student_answer"], model_ans, threshold=0.98):
-        score_total_raw = 10
+        score_total_raw = max_score
 
-    score_total_scaled = int(round(score_total_raw * max_score / 10))
-    score_total_scaled = max(0, min(max_score, score_total_scaled))
+    score_total_scaled, score_total_base10, normalize_reason = normalize_score_value(score_total_raw, max_score)
+    if score_total_scaled is None or score_total_base10 is None:
+        append_jsonl(LOG_DIR / "grading.jsonl", {
+            "event": "grading_invalid_schema",
+            "reason": normalize_reason,
+            "result": result,
+            "requested_max_score": max_score,
+            "score_raw": score_total_raw,
+            "model": DEFAULT_MODEL,
+            "ts": now_ms(),
+        })
+        _update_metrics("grade", False, t0)
+        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total の値が不正です"}), 502
 
     commentary_raw = (result.get("commentary", "") or short_comment).strip()
     head = f"{score_label}中{score_total_scaled}点"
@@ -2005,7 +2059,7 @@ def grade_answer():
             prob = None
 
     if prob is None:
-        prob = int(round(score_total_raw * 10))
+        prob = int(round(score_total_base10 * 10))
         if not prob_note:
             prob_note = "スコアからの簡易推定"
 
@@ -2029,6 +2083,8 @@ def grade_answer():
         "category": stock_category,
         "score": score_total_scaled,
         "max_points": max_score,
+        "score_raw": score_total_raw,
+        "score_normalize_reason": normalize_reason,
         "perfect_probability": prob,
         "assist_on": data.get("assist_on", False),
         "rewrite_count": data.get("rewrite_count", 0),
@@ -2065,7 +2121,7 @@ def grade_answer():
             rubric_diff[key] = diff
             if diff > 0:
                 improvements.append(f"{label}が前回より良くなりました")
-        if score_total_raw > prev_score_total and len(improvements) < 2:
+        if score_total_scaled > prev_score_total and len(improvements) < 2:
             improvements.append("総合点が前回より上がりました")
         improvements = improvements[:2]
     else:
@@ -2078,7 +2134,7 @@ def grade_answer():
         "question": data["question"],
         "answer": data["student_answer"],
         "score_total": score_total_scaled,
-        "score_total_raw": score_total_raw,
+        "score_total_raw": score_total_scaled,
         "max_score": max_score,
         "rubric": rubric,
         "good_points": good_points,
@@ -2091,7 +2147,7 @@ def grade_answer():
         "ok": True,
         "score": score_total_scaled,
         "score_total": score_total_scaled,
-        "score_total_raw": score_total_raw,
+        "score_total_raw": score_total_scaled,
         "commentary": commentary,
         "short_comment": short_comment,
         "good_points": good_points,
