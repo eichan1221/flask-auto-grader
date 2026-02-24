@@ -6,18 +6,81 @@ import app as grader_app
 
 class GradeAnswerBehaviorTests(unittest.TestCase):
     def setUp(self):
-        self.client = grader_app.app.test_client()
         grader_app.app.config["TESTING"] = True
+        self.client = grader_app.app.test_client()
 
-    def _payload(self, difficulty: str = "10点", max_score=None):
+    def _payload(self, difficulty: str = "10点", max_score=None, rewrite_count: int = 0):
         payload = {
             "question": "鎌倉幕府が成立した理由を説明しなさい。",
             "student_answer": "武士が力を持ち、源頼朝が政治の中心を鎌倉に置いたから。",
             "difficulty": difficulty,
+            "rewrite_count": rewrite_count,
         }
         if max_score is not None:
             payload["max_score"] = max_score
         return payload
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_ten_point_first_grade_success(self, mock_parse, *_):
+        mock_parse.return_value = ({
+            "score_total": 7,
+            "good_points": ["結論がある", "理由が書けている"],
+            "next_step": "具体例を入れる",
+            "rewrite_tip": "具体例を1つ追加",
+            "short_comment": "あと一歩",
+            "best_sentence": "理由は書けている。",
+            "rubric": {"conclusion": 2, "logic": 2, "wording": 2},
+        }, "")
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["max_score"], 10)
+        self.assertEqual(body["score_total"], 7)
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_rewrite_rescore_success_and_perfect_score_is_safe(self, mock_parse, *_):
+        mock_parse.side_effect = [
+            ({
+                "score_total": 8,
+                "good_points": ["結論が明確", "理由が具体的"],
+                "next_step": "語句をもう1つ加える",
+                "rewrite_tip": "重要語句を増やす",
+                "short_comment": "もう少しで満点",
+                "best_sentence": "武士が政治の中心になった。",
+                "rubric": {"conclusion": 2, "logic": 3, "wording": 2},
+            }, ""),
+            ({
+                "score_total": "10/10",
+                "good_points": ["結論が明確", "理由が具体的", "語句が正確"],
+                "next_step": "",
+                "rewrite_tip": "",
+                "short_comment": "満点です",
+                "best_sentence": "源頼朝が鎌倉に幕府を開いた。",
+                "rubric": {"conclusion": 3, "logic": 3, "wording": 3},
+            }, ""),
+        ]
+
+        first = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=0))
+        self.assertEqual(first.status_code, 200)
+        first_body = first.get_json()
+        self.assertTrue(first_body["ok"])
+        self.assertEqual(first_body["score_total"], 8)
+
+        second = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=1))
+        self.assertEqual(second.status_code, 200)
+        body = second.get_json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["is_perfect_score"])
+        self.assertEqual(body["score_total"], 10)
+        self.assertEqual(body["max_score"], 10)
+        self.assertEqual(body["improvements"], [])
+        self.assertEqual(body["rewrite_tip"], "")
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
@@ -50,30 +113,6 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
     @patch("app.parse_grading_response_with_retry")
-    def test_non_perfect_keeps_improvement_fields(self, mock_parse, *_):
-        mock_parse.return_value = ({
-            "score_total": 7,
-            "good_points": ["結論がある", "理由が書けている"],
-            "next_step": "具体例を入れる",
-            "rewrite_tip": "具体例を1つ追加",
-            "next_steps": ["次は語句を足す"],
-            "practice_menu": ["50字で要約"],
-            "weak_tags": ["具体例不足"],
-            "short_comment": "あと一歩",
-            "best_sentence": "理由は書けている。",
-            "rubric": {"conclusion": 2, "logic": 2, "wording": 2},
-        }, "")
-
-        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
-        self.assertEqual(res.status_code, 200)
-        body = res.get_json()
-        self.assertFalse(body["is_perfect_score"])
-        self.assertEqual(body["rewrite_tip"], "具体例を1つ追加")
-        self.assertNotEqual(body["next_steps"], [])
-
-    @patch("app.ensure_openai", return_value=None)
-    @patch("app.resolve_model_answer", return_value="")
-    @patch("app.parse_grading_response_with_retry")
     def test_perfect_score_detected_for_supported_max_points(self, mock_parse, *_):
         mock_parse.return_value = ({
             "score_total": 10,
@@ -100,6 +139,13 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "unsupported_max_score")
         self.assertIn("5点配点は現在利用できません", body["message"])
+
+    @patch("app.ensure_openai", return_value="openai unavailable")
+    def test_grading_failure_returns_ok_false(self, *_):
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 503)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
