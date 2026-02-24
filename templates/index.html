@@ -1728,10 +1728,18 @@
       toast('採点対象にセットしました');
     }
 
+    function safeScoreValue(v, fallback=0){
+      const n = Number(v);
+      if(Number.isFinite(n)) return n;
+      const m = String(v ?? '').match(/\d+(?:\.\d+)?/);
+      return m ? Number(m[0]) : fallback;
+    }
+
     function renderResultHeader(r){
-      const score = r?.score_total ?? r?.score ?? 0;
-      const label = r?.score_label || `${r?.max_score ?? 10}点`;
-      const isPerfect = Boolean(r?.is_perfect_score) || (Number(score) >= Number(r?.max_score ?? 10));
+      const score = safeScoreValue(r?.score_total ?? r?.score ?? 0, 0);
+      const maxScore = safeScoreValue(r?.max_score ?? 10, 10);
+      const label = r?.score_label || `${maxScore}点`;
+      const isPerfect = Boolean(r?.is_perfect_score) || (score >= maxScore);
       $('#scoreLine').textContent = isPerfect ? `満点（${label}中${score}点）` : `${label}中${score}点`;
       const perfectBadge = $('#perfectBadge');
       if(perfectBadge) perfectBadge.style.display = isPerfect ? 'inline-flex' : 'none';

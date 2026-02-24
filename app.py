@@ -785,11 +785,24 @@ def normalize_score_value(score_raw: Any, requested_max_score: int) -> Tuple[Opt
     """score_rawを受け取り、10/100の配点に正規化する。"""
     if requested_max_score not in {10, 100}:
         return None, None, "unsupported_max_score"
+
+    score_num: Optional[float] = None
     try:
         score_num = float(score_raw)
     except Exception:
-        return None, None, "invalid_score"
+        text = normalize_text(str(score_raw))
+        nums = re.findall(r"\d+(?:\.\d+)?", text)
+        if "/" in text and len(nums) >= 1:
+            # 例: "10/10", "8/10点" を拾う
+            score_num = float(nums[0])
+        elif len(nums) == 1:
+            # 例: "10点", "100点満点中10点"
+            score_num = float(nums[0])
+        else:
+            return None, None, "invalid_score"
 
+    if score_num is None:
+        return None, None, "invalid_score"
     if score_num < 0:
         return None, None, "negative_score"
 
