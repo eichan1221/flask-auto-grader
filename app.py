@@ -434,13 +434,29 @@ def normalize_grading_result_shape(result: Dict[str, Any]) -> Dict[str, Any]:
     """AI採点結果のキー揺れ・型揺れを吸収する。"""
     normalized = dict(result or {})
 
+    # ネストされた採点オブジェクトを救済
+    for nested_key in ("result", "grade_result", "data", "grading"):
+        nested = normalized.get(nested_key)
+        if isinstance(nested, dict):
+            for k, v in nested.items():
+                normalized.setdefault(k, v)
+
     if "score_total" not in normalized:
-        for key in ("score", "total_score", "scoreTotal", "points", "得点"):
+        for key in ("score", "total_score", "scoreTotal", "points", "grade", "得点"):
             if key in normalized:
                 normalized["score_total"] = normalized.get(key)
                 break
 
-    for list_key in ("good_points", "next_steps", "practice_menu", "weak_tags", "reasons", "full_score_criteria"):
+    if "improvements" not in normalized:
+        for key in ("advice", "improvement", "improvement_points", "next_improvements"):
+            if key in normalized:
+                normalized["improvements"] = normalized.get(key)
+                break
+
+    for list_key in (
+        "good_points", "next_steps", "practice_menu", "weak_tags",
+        "reasons", "full_score_criteria", "improvements",
+    ):
         val = normalized.get(list_key)
         if val is None:
             continue
@@ -468,6 +484,87 @@ def normalize_grading_result_shape(result: Dict[str, Any]) -> Dict[str, Any]:
             normalized[key] = str(normalized.get(key))
 
     return normalized
+
+
+def normalize_string_list(raw: Any, *, limit: int = 3, fallback: Optional[List[str]] = None, item_limit: int = 120) -> List[str]:
+    fallback = fallback or []
+    out: List[str] = []
+
+    if isinstance(raw, list):
+        src = raw
+    elif raw is None:
+        src = []
+    elif isinstance(raw, str):
+        src = re.split(r"[\n\r・•,，、;；]", raw)
+    else:
+        src = [str(raw)]
+
+    for item in src:
+        text = normalize_text(str(item))
+        if not text:
+            continue
+        out.append(text[:item_limit])
+        if len(out) >= limit:
+            break
+
+    for fill in fallback:
+        if len(out) >= limit:
+            break
+        out.append(fill)
+
+    return out[:limit]
+
+
+def format_hint_text(raw_text: Any, max_items: int = 4) -> str:
+    """解説/出題意図のヒントを、問題文の言い換えを避けつつ読みやすく整形する。"""
+    text = normalize_text(raw_text)
+    if not text:
+        return ""
+
+    pieces = [normalize_text(x) for x in re.split(r"[\n\r]+", text) if normalize_text(x)]
+    if len(pieces) == 1:
+        pieces = [normalize_text(x) for x in re.split(r"[。.!！?？]", text) if normalize_text(x)]
+
+    tagged: List[str] = []
+    labels = [
+        ("着眼点", ("着眼", "注目", "見る", "観点")),
+        ("キーワード", ("キーワード", "用語", "語句", "語")),
+        ("順番", ("順番", "まず", "次に", "最後")),
+        ("注意", ("注意", "ミス", "不十分", "避け")),
+        ("書き出し", ("書き出し", "〜から", "型", "言い切")),
+    ]
+
+    for line in pieces:
+        if len(tagged) >= max_items:
+            break
+        if len(line) < 6:
+            continue
+        if line.startswith("- "):
+            tagged.append(line)
+            continue
+        label = "ヒント"
+        for k, needles in labels:
+            if any(n in line for n in needles):
+                label = k
+                break
+        tagged.append(f"- {label}: {line}")
+
+    if not tagged:
+        tagged = [f"- 着眼点: {text[:100]}"]
+
+    return "\n".join(tagged[:max_items])
+
+
+def hint_is_too_similar_to_question(question: str, hint_text: str) -> bool:
+    if not question or not hint_text:
+        return False
+    q = normalize_text(question)
+    h = normalize_text(hint_text)
+    if not q or not h:
+        return False
+    ratio = SequenceMatcher(None, normalize_for_match(q), normalize_for_match(h)).ratio()
+    overlap = keyword_overlap_score(q, h)
+    return ratio >= 0.7 or overlap >= 0.55
 
 
 def short_text(s: Any, limit: int = 200) -> str:
@@ -1036,7 +1133,10 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "2) JSONで返す: {"
         '"question": str, "model_answer": str, "explanation": str, "intention": str, "tags": [str]'
         "}\n"
-        "3) 同一テーマの連発を避ける\n"
+        "3) explanation/intention は『問題文の言い換え禁止』。\n"
+        "   2〜4個の短い箇条書きで、少なくとも以下から2項目を含める: "
+        "着眼点 / キーワード候補 / 考える順番 / 比較観点 / よくあるミス回避 / 書き出しの型。\n"
+        "4) 同一テーマの連発を避ける\n"
     )
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
@@ -1928,8 +2028,20 @@ def generate_question():
         obj = parse_first_json_block(text) or {}
         question = normalize_text(obj.get("question", ""))[:2000]
         model_answer = normalize_text(obj.get("model_answer", ""))[:2000]
-        explanation = (obj.get("explanation", "") or "").strip()
-        intention = (obj.get("intention", "") or "").strip()
+        explanation = format_hint_text(obj.get("explanation", ""))
+        intention = format_hint_text(obj.get("intention", ""))
+        if hint_is_too_similar_to_question(question, explanation):
+            explanation = "\n".join([
+                "- 着眼点: 問題で問われる『原因→しくみ→結果』のつながりを1つ示す",
+                "- キーワード: 重要語句を1〜2語入れて具体性を出す",
+                "- 注意: 用語の定義だけで終わらず、結果や影響まで書く",
+            ])
+        if hint_is_too_similar_to_question(question, intention):
+            intention = "\n".join([
+                "- 着眼点: 何を比べる/説明する問題かを最初に明確にする",
+                "- 順番: 結論→理由→具体例の順で短くまとめる",
+                "- 書き出し: 『〜の理由は、』の型で始めると書きやすい",
+            ])
         tags = obj.get("tags", []) or []
         if not isinstance(tags, list):
             tags = [str(tags)]
@@ -2059,26 +2171,33 @@ def grade_answer():
             "error": "grading_parse_failed",
             "message": "採点結果の解析に失敗しました。時間をおいて再試行してください。"
         }), 502
-    if "score_total" not in result and "score" not in result:
+
+    result = normalize_grading_result_shape(result)
+
+    if "score_total" not in result:
         append_jsonl(LOG_DIR / "grading.jsonl", {
             "event": "grading_invalid_schema",
             "reason": "missing_score_total",
-            "result": result,
+            "keys": sorted(list(result.keys()))[:30],
+            "score_candidates": {
+                "score": short_text(result.get("score", ""), 40),
+                "grade": short_text(result.get("grade", ""), 40),
+                "points": short_text(result.get("points", ""), 40),
+            },
             "model": DEFAULT_MODEL,
             "ts": now_ms(),
         })
         _update_metrics("grade", False, t0)
         return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total が不足しています"}), 502
 
-    score_total_raw = result.get("score_total", result.get("score"))
+    score_total_raw = result.get("score_total")
 
-    good_points = result.get("good_points", [])
-    if not isinstance(good_points, list):
-        good_points = [str(good_points)]
-    good_points = [normalize_text(str(x))[:120] for x in good_points if str(x).strip()]
-    while len(good_points) < 2:
-        good_points.append("問いに沿った要素が書けています")
-    good_points = good_points[:2]
+    good_points = normalize_string_list(
+        result.get("good_points", []),
+        limit=2,
+        fallback=["問いに沿った要素が書けています", "理由の方向性はつかめています"],
+        item_limit=120,
+    )
 
     rubric_raw = result.get("rubric", {}) if isinstance(result.get("rubric", {}), dict) else {}
     def _rubric_score(key: str) -> int:
@@ -2103,24 +2222,15 @@ def grade_answer():
     generic_hits = ("具体的", "詳しく", "詳細", "もっと", "より")
     next_step = next_step_raw if next_step_raw and not any(k in next_step_raw for k in generic_hits) else next_step_text
 
-    next_steps = result.get("next_steps", [])
-    if not isinstance(next_steps, list):
-        next_steps = []
-    next_steps = [normalize_text(str(x))[:120] for x in next_steps if str(x).strip()]
+    next_steps = normalize_string_list(result.get("next_steps", []), limit=3, item_limit=120)
     if not next_steps:
         next_steps = next_steps_fallback
 
-    practice_menu = result.get("practice_menu", [])
-    if not isinstance(practice_menu, list):
-        practice_menu = []
-    practice_menu = [normalize_text(str(x))[:120] for x in practice_menu if str(x).strip()]
+    practice_menu = normalize_string_list(result.get("practice_menu", []), limit=3, item_limit=120)
     if not practice_menu:
         practice_menu = practice_fallback
 
-    weak_tags = result.get("weak_tags", [])
-    if not isinstance(weak_tags, list):
-        weak_tags = []
-    weak_tags = [normalize_text(str(x))[:20] for x in weak_tags if str(x).strip()]
+    weak_tags = normalize_string_list(result.get("weak_tags", []), limit=6, item_limit=20)
 
     best_sentence = (result.get("best_sentence", "") or "").strip()
     short_comment = (result.get("short_comment", "") or "").strip()
@@ -2142,9 +2252,10 @@ def grade_answer():
         append_jsonl(LOG_DIR / "grading.jsonl", {
             "event": "grading_invalid_schema",
             "reason": normalize_reason,
-            "result": result,
+            "keys": sorted(list(result.keys()))[:30],
             "requested_max_score": max_score,
-            "score_raw": score_total_raw,
+            "score_raw": short_text(score_total_raw, 60),
+            "score_type": type(score_total_raw).__name__,
             "model": DEFAULT_MODEL,
             "ts": now_ms(),
         })
@@ -2158,15 +2269,9 @@ def grade_answer():
     else:
         commentary = commentary_raw
 
-    reasons = result.get("reasons", [])
-    if not isinstance(reasons, list):
-        reasons = [str(reasons)]
-    reasons = [normalize_text(str(x))[:200] for x in reasons][:8]
+    reasons = normalize_string_list(result.get("reasons", []), limit=8, item_limit=200)
 
-    criteria = result.get("full_score_criteria", [])
-    if not isinstance(criteria, list):
-        criteria = [str(criteria)]
-    criteria = [normalize_text(str(x))[:120] for x in criteria if str(x).strip()]
+    criteria = normalize_string_list(result.get("full_score_criteria", []), limit=5, item_limit=120)
     if not criteria:
         criteria = ["結論が明確", "理由が1つ以上ある", "重要語句が入っている"]
 
