@@ -7,6 +7,9 @@ import app as grader_app
 class GradeAnswerBehaviorTests(unittest.TestCase):
     def setUp(self):
         grader_app.app.config["TESTING"] = True
+        grader_app._rate_bucket.clear()
+        grader_app.FREE_DAILY_MAIN_LIMIT = 9999
+        grader_app.FREE_DAILY_AI_LIMIT = 9999
         self.client = grader_app.app.test_client()
 
     def _payload(self, difficulty: str = "10点", max_score=None, rewrite_count: int = 0):
@@ -152,6 +155,53 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
     @patch("app.parse_grading_response_with_retry")
     def test_missing_score_total_returns_error(self, mock_parse, *_):
         mock_parse.return_value = ({"good_points": ["A"]}, "")
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 502)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"], "grading_invalid_schema")
+
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_rewrite_perfect_rescore_accepts_grade_alias_and_string_lists(self, mock_parse, *_):
+        mock_parse.side_effect = [
+            ({
+                "score_total": 6,
+                "good_points": ["要点あり", "方向性OK"],
+                "rubric": {"conclusion": 2, "logic": 2, "wording": 1},
+            }, ""),
+            ({
+                "grade": "10/10",
+                "good_points": "結論・理由・語句",
+                "advice": None,
+                "rubric": {"conclusion": 3, "logic": 3, "wording": 3},
+                "short_comment": "完成度が高い",
+            }, ""),
+        ]
+
+        first = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=0))
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=1))
+        self.assertEqual(second.status_code, 200)
+        body = second.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["score_total"], 10)
+        self.assertTrue(body["is_perfect_score"])
+        self.assertEqual(body["improvements"], [])
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_schema_invalid_score_returns_ok_false(self, mock_parse, *_):
+        mock_parse.return_value = ({
+            "score_total": "N/A",
+            "good_points": "結論がある",
+            "rubric": {"conclusion": 1, "logic": 1, "wording": 1},
+        }, "")
 
         res = self.client.post("/api/grade_answer", json=self._payload("10点"))
         self.assertEqual(res.status_code, 502)

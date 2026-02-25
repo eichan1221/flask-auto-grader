@@ -858,6 +858,36 @@
         .replaceAll("'","&#39;");
     }
 
+
+    function renderHintLikeText(target, text){
+      if(!target) return;
+      const raw = String(text || '').trim();
+      if(!raw){
+        target.textContent = '';
+        return;
+      }
+      const lines = raw
+        .split(/\n+/)
+        .map(s=>s.replace(/^[-・\s]+/, '').trim())
+        .filter(Boolean)
+        .slice(0, 6);
+
+      if(lines.length <= 1){
+        target.textContent = raw;
+        return;
+      }
+
+      const ul = document.createElement('ul');
+      ul.className = 'hint-points';
+      lines.forEach(line=>{
+        const li = document.createElement('li');
+        li.textContent = line;
+        ul.appendChild(li);
+      });
+      target.innerHTML = '';
+      target.appendChild(ul);
+    }
+
     function scrollToElement(el, focus=false){
       if(!el) return;
       el.scrollIntoView({behavior:'smooth', block:'start'});
@@ -1548,8 +1578,8 @@
     function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
-      $('#genExplanation').textContent = item.explanation || '';
-      $('#genIntention').textContent = item.intention || '';
+      renderHintLikeText($('#genExplanation'), item.explanation || '');
+      renderHintLikeText($('#genIntention'), item.intention || '');
       const tags = item.tags || [];
       const meta = [];
       if(item.subject) meta.push(item.subject);
@@ -1701,8 +1731,8 @@
         $('#grade').value = it.grade;
       }
       $('#currentQuestionText').textContent = it.question || '';
-      $('#currentExpl').textContent = it.explanation || '';
-      $('#currentIntn').textContent = it.intention || '';
+      renderHintLikeText($('#currentExpl'), it.explanation || '');
+      renderHintLikeText($('#currentIntn'), it.intention || '');
       const difficultyValue = it.difficulty || maxPointsToDifficulty(it.max_points);
       if(difficultyValue){
         $('#gradeDifficulty').value = difficultyValue;
