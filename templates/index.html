@@ -1057,6 +1057,7 @@
         if(data){
           if(data.error) msg += `: ${data.error}`;
           if(data.message && !msg.includes(data.message)) msg += ` / ${data.message}`;
+          if(data.request_id) msg += ` (request_id: ${data.request_id})`;
         }
         const err = new Error(msg);
         err.status = res.status;

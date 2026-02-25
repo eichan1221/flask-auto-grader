@@ -735,6 +735,80 @@ def _get_user_key() -> str:
     uid = normalize_text(uid)
     return uid or "anonymous"
 
+
+def _mask_user_id(raw_user_id: Optional[str]) -> str:
+    user_id = normalize_text(raw_user_id or "")
+    if not user_id:
+        return "anonymous"
+    digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:10]
+    tail = user_id[-3:] if len(user_id) >= 3 else user_id
+    return f"***{tail}:{digest}"
+
+
+def _is_development_logging() -> bool:
+    env = (os.getenv("FLASK_ENV", "") or "").strip().lower()
+    return app.debug or env == "development" or env_bool("DEBUG")
+
+
+def _grade_error_message(error_type: str) -> str:
+    messages = {
+        "openai_unavailable": "採点サービスに接続できません。時間をおいて再試行してください。",
+        "invalid_content_type": "送信形式が正しくありません。ページを再読み込みして再試行してください。",
+        "unsupported_max_score": "5点配点は現在利用できません。10点または100点を選択してください。",
+        "invalid_request": "問題文または解答が不足しています。入力内容をご確認ください。",
+        "upstream_error": "採点処理で通信エラーが発生しました。時間をおいて再試行してください。",
+        "grading_parse_failed": "採点結果の解析に失敗しました。もう一度お試しください。",
+        "grading_invalid_schema": "採点結果の解析に失敗しました。もう一度お試しください。",
+    }
+    return messages.get(error_type, "採点中にエラーが発生しました。もう一度お試しください。")
+
+
+def _append_grade_error_log(
+    *,
+    request_id: str,
+    error_type: str,
+    http_status: int,
+    max_score: Optional[int],
+    is_rewrite: bool,
+    user_id_masked: str,
+    schema_error_detail: Optional[Dict[str, Any]] = None,
+    normalize_summary: Optional[Dict[str, Any]] = None,
+    ai_response_excerpt: Optional[str] = None,
+):
+    payload: Dict[str, Any] = {
+        "event": "grade_answer_error",
+        "error_type": error_type,
+        "request_id": request_id,
+        "max_score": max_score,
+        "is_rewrite": bool(is_rewrite),
+        "user_id_masked": user_id_masked,
+        "http_status": http_status,
+        "path": "/api/grade_answer",
+        "method": "POST",
+        "model": DEFAULT_MODEL,
+        "ts": now_ms(),
+    }
+
+    if schema_error_detail:
+        payload["schema_error_detail"] = schema_error_detail
+    if normalize_summary:
+        payload["normalize_summary"] = normalize_summary
+    if _is_development_logging() and ai_response_excerpt:
+        payload["ai_response_excerpt"] = short_text(ai_response_excerpt, 280)
+
+    append_jsonl(LOG_DIR / "grading.jsonl", payload)
+
+
+def _grade_error_response(*, request_id: str, error_type: str, http_status: int, message: Optional[str] = None, **extra):
+    body: Dict[str, Any] = {
+        "ok": False,
+        "error": error_type,
+        "message": message or _grade_error_message(error_type),
+        "request_id": request_id,
+    }
+    body.update(extra)
+    return jsonify(body), http_status
+
 def _empty_usage() -> Dict[str, int]:
     return {
         "total": 0,
@@ -2127,13 +2201,36 @@ def generate_question():
 @enforce_quota("grade")
 def grade_answer():
     t0 = time.time()
+    request_id = str(uuid.uuid4())
+    user_id_masked = _mask_user_id(request.headers.get("X-User-Id", ""))
+    requested_max_int: Optional[int] = None
+    max_score_for_log: Optional[int] = None
+    ai_raw_text = ""
+    is_rewrite = False
+
     err = ensure_openai()
     if err:
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": err}), 503
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="openai_unavailable",
+            http_status=503,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+        )
+        return _grade_error_response(request_id=request_id, error_type="openai_unavailable", http_status=503)
     if not request.is_json:
         _update_metrics("grade", False, t0)
-        return jsonify({"error": "Content-Type must be application/json"}), 415
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="invalid_content_type",
+            http_status=415,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+        )
+        return _grade_error_response(request_id=request_id, error_type="invalid_content_type", http_status=415)
 
     data_in = request.get_json(force=True, silent=True) or {}
     requested_max_raw = data_in.get("max_score", data_in.get("max_points"))
@@ -2141,54 +2238,98 @@ def grade_answer():
         requested_max_int = int(requested_max_raw) if requested_max_raw is not None else None
     except Exception:
         requested_max_int = None
+    max_score_for_log = requested_max_int if requested_max_int in {10, 100} else None
+    try:
+        is_rewrite = int(data_in.get("rewrite_count", 0)) > 0
+    except Exception:
+        is_rewrite = False
+
     if requested_max_int == 5:
         _update_metrics("grade", False, t0)
-        return jsonify({
-            "ok": False,
-            "error": "unsupported_max_score",
-            "message": "5点配点は現在利用できません。10点または100点を選択してください。"
-        }), 400
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="unsupported_max_score",
+            http_status=400,
+            max_score=5,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+        )
+        return _grade_error_response(request_id=request_id, error_type="unsupported_max_score", http_status=400)
 
     data = validate_grading_payload(data_in)
+    max_score_for_log = int(data.get("max_points") or difficulty_max_score(data.get("difficulty", "10点")))
+    max_score_for_log = max_score_for_log if max_score_for_log in {10, 100} else difficulty_max_score(data.get("difficulty", "10点"))
+    is_rewrite = int(data.get("rewrite_count", 0)) > 0
 
     if not data["question"] or not data["student_answer"]:
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": "question と student_answer は必須です"}), 400
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="invalid_request",
+            http_status=400,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+        )
+        return _grade_error_response(request_id=request_id, error_type="invalid_request", http_status=400)
 
     data["model_answer"] = resolve_model_answer(data)
     messages = build_grading_messages(data)
     try:
         # 用途: 採点（採点・講評・改善提案）
-        result, _ = parse_grading_response_with_retry(messages)
+        result, ai_raw_text = parse_grading_response_with_retry(messages)
     except Exception as e:
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="upstream_error",
+            http_status=502,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+            ai_response_excerpt=str(e),
+        )
+        return _grade_error_response(request_id=request_id, error_type="upstream_error", http_status=502)
 
     if not isinstance(result, dict):
         _update_metrics("grade", False, t0)
-        return jsonify({
-            "ok": False,
-            "error": "grading_parse_failed",
-            "message": "採点結果の解析に失敗しました。時間をおいて再試行してください。"
-        }), 502
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="grading_parse_failed",
+            http_status=502,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+            ai_response_excerpt=ai_raw_text,
+        )
+        return _grade_error_response(request_id=request_id, error_type="grading_parse_failed", http_status=502)
 
     result = normalize_grading_result_shape(result)
 
     if "score_total" not in result:
-        append_jsonl(LOG_DIR / "grading.jsonl", {
-            "event": "grading_invalid_schema",
-            "reason": "missing_score_total",
-            "keys": sorted(list(result.keys()))[:30],
-            "score_candidates": {
-                "score": short_text(result.get("score", ""), 40),
-                "grade": short_text(result.get("grade", ""), 40),
-                "points": short_text(result.get("points", ""), 40),
-            },
-            "model": DEFAULT_MODEL,
-            "ts": now_ms(),
-        })
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total が不足しています"}), 502
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="grading_invalid_schema",
+            http_status=502,
+            max_score=max_score_for_log,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+            schema_error_detail={
+                "reason": "missing_score_total",
+                "expected": "score_total",
+                "actual_keys": sorted(list(result.keys()))[:30],
+            },
+            normalize_summary={
+                "score_candidates": {
+                    "score": short_text(result.get("score", ""), 40),
+                    "grade": short_text(result.get("grade", ""), 40),
+                    "points": short_text(result.get("points", ""), 40),
+                }
+            },
+            ai_response_excerpt=ai_raw_text,
+        )
+        return _grade_error_response(request_id=request_id, error_type="grading_invalid_schema", http_status=502)
 
     score_total_raw = result.get("score_total")
 
@@ -2249,18 +2390,26 @@ def grade_answer():
 
     score_total_scaled, score_total_base10, normalize_reason = normalize_score_value(score_total_raw, max_score)
     if score_total_scaled is None or score_total_base10 is None:
-        append_jsonl(LOG_DIR / "grading.jsonl", {
-            "event": "grading_invalid_schema",
-            "reason": normalize_reason,
-            "keys": sorted(list(result.keys()))[:30],
-            "requested_max_score": max_score,
-            "score_raw": short_text(score_total_raw, 60),
-            "score_type": type(score_total_raw).__name__,
-            "model": DEFAULT_MODEL,
-            "ts": now_ms(),
-        })
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": "grading_invalid_schema", "detail": "score_total の値が不正です"}), 502
+        _append_grade_error_log(
+            request_id=request_id,
+            error_type="grading_invalid_schema",
+            http_status=502,
+            max_score=max_score,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+            schema_error_detail={
+                "reason": normalize_reason,
+                "expected": f"score_total compatible with max_score={max_score}",
+                "actual": short_text(score_total_raw, 60),
+            },
+            normalize_summary={
+                "requested_max_score": max_score,
+                "score_type": type(score_total_raw).__name__,
+            },
+            ai_response_excerpt=ai_raw_text,
+        )
+        return _grade_error_response(request_id=request_id, error_type="grading_invalid_schema", http_status=502)
 
     commentary_raw = (result.get("commentary", "") or short_comment).strip()
     head = f"{score_label}中{score_total_scaled}点"
@@ -2307,8 +2456,10 @@ def grade_answer():
 
     graded_log = {
         "event": "graded",
+        "request_id": request_id,
         "teacher_request": teacher_request,
         "user_key": _get_user_key(),
+        "user_id_masked": user_id_masked,
         "subject": stock_subject,
         "category": stock_category,
         "score": score_total_scaled,
@@ -2321,6 +2472,7 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "answer_length": answer_length,
+        "is_rewrite": is_rewrite,
         "model": DEFAULT_MODEL,
         "ts": now_ms()
     }
@@ -2408,6 +2560,7 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "model": DEFAULT_MODEL,
+        "request_id": request_id,
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
 

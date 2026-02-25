@@ -43,6 +43,7 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(body["max_score"], 10)
         self.assertEqual(body["score_total"], 7)
+        self.assertRegex(body["request_id"], r"^[0-9a-f-]{36}$")
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
@@ -161,6 +162,7 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         body = res.get_json()
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "grading_invalid_schema")
+        self.assertIn("request_id", body)
 
 
     @patch("app.ensure_openai", return_value=None)
@@ -219,6 +221,31 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "grading_parse_failed")
         self.assertIn("message", body)
+        self.assertRegex(body["request_id"], r"^[0-9a-f-]{36}$")
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.append_jsonl")
+    @patch("app.parse_grading_response_with_retry", return_value=(None, "raw llm text"))
+    def test_parse_failure_emits_structured_error_log(self, *_mocks):
+        mock_log = _mocks[1]
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=1))
+        self.assertEqual(res.status_code, 502)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
+
+        records = [call.args[1] for call in mock_log.call_args_list if call.args and call.args[0].name == "grading.jsonl"]
+        error_logs = [r for r in records if r.get("event") == "grade_answer_error"]
+        self.assertTrue(error_logs)
+        event = error_logs[-1]
+        self.assertEqual(event.get("error_type"), "grading_parse_failed")
+        self.assertEqual(event.get("http_status"), 502)
+        self.assertEqual(event.get("max_score"), 10)
+        self.assertTrue(event.get("is_rewrite"))
+        self.assertIn("user_id_masked", event)
+        self.assertEqual(event.get("request_id"), body.get("request_id"))
+
 
 
 class GradingParseRobustnessTests(unittest.TestCase):
