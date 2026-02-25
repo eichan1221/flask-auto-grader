@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import app as grader_app
 
@@ -158,6 +158,60 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         body = res.get_json()
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "grading_invalid_schema")
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry", return_value=(None, "not json"))
+    def test_parse_failure_returns_ok_false(self, *_):
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 502)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"], "grading_parse_failed")
+        self.assertIn("message", body)
+
+
+class GradingParseRobustnessTests(unittest.TestCase):
+    def test_parse_json_object_loose_accepts_plain_json(self):
+        parsed, source = grader_app.parse_json_object_loose('{"score_total": 8, "good_points": ["A"]}')
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(parsed.get("score_total"), 8)
+        self.assertIn(source, {"raw", "embedded_json"})
+
+    def test_parse_json_object_loose_accepts_code_fence(self):
+        text = """```json\n{\n  \"score_total\": \"10/10\",\n  \"good_points\": \"結論・理由\"\n}\n```"""
+        parsed, _ = grader_app.parse_json_object_loose(text)
+        self.assertEqual(parsed.get("score_total"), "10/10")
+
+    def test_parse_json_object_loose_accepts_prefixed_text(self):
+        text = "採点結果です。\n{\"score_total\":7,\"good_points\":[\"要点\"]}\n以上です。"
+        parsed, source = grader_app.parse_json_object_loose(text)
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(parsed.get("score_total"), 7)
+        self.assertEqual(source, "embedded_json")
+
+    @patch("app.append_jsonl")
+    def test_parse_grading_response_with_retry_retries_once_then_succeeds(self, mock_log):
+        first = Mock()
+        first.choices = [Mock(message=Mock(content="採点します\n```json\n{\"score_total\": 9"))]
+        second = Mock()
+        second.choices = [Mock(message=Mock(content='{"score_total": 9, "good_points": ["A"]}'))]
+
+        mock_create = Mock(side_effect=[first, second])
+        original_client = grader_app.client
+        grader_app.client = Mock(chat=Mock(completions=Mock(create=mock_create)))
+        try:
+            parsed, raw = grader_app.parse_grading_response_with_retry([{"role": "user", "content": "x"}])
+        finally:
+            grader_app.client = original_client
+
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(parsed.get("score_total"), 9)
+        self.assertIn("score_total", raw)
+        self.assertEqual(mock_create.call_count, 2)
+        events = [call.args[1].get("event") for call in mock_log.call_args_list]
+        self.assertIn("grading_parse_failed", events)
+        self.assertIn("grading_parse_retry_happened", events)
 
 
 if __name__ == "__main__":

@@ -383,6 +383,93 @@ def parse_first_json_block(text: str) -> Dict[str, Any]:
     return {}
 
 
+def parse_json_object_loose(text: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """モデル出力からJSONオブジェクトを緩やかに抽出する。"""
+    raw = (text or "").strip().lstrip("\ufeff")
+    if not raw:
+        return None, "empty_text"
+
+    decoder = json.JSONDecoder()
+    candidates: List[Tuple[str, str]] = [("raw", raw)]
+
+    # ```json ... ``` 形式を優先抽出
+    fence_hits = re.findall(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE)
+    for idx, block in enumerate(fence_hits):
+        b = block.strip()
+        if b:
+            candidates.append((f"code_fence_{idx}", b))
+
+    # 文字列中にJSONが埋め込まれている場合はraw_decodeで探索
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(raw[i:])
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            return obj, "embedded_json"
+
+    seen = set()
+    for source, cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        try:
+            obj = json.loads(cand)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            return obj, source
+
+    # 最終手段: 最初の { ... } を切り出して試す
+    fallback = parse_first_json_block(raw)
+    if isinstance(fallback, dict) and fallback:
+        return fallback, "first_block"
+
+    return None, "json_not_found"
+
+
+def normalize_grading_result_shape(result: Dict[str, Any]) -> Dict[str, Any]:
+    """AI採点結果のキー揺れ・型揺れを吸収する。"""
+    normalized = dict(result or {})
+
+    if "score_total" not in normalized:
+        for key in ("score", "total_score", "scoreTotal", "points", "得点"):
+            if key in normalized:
+                normalized["score_total"] = normalized.get(key)
+                break
+
+    for list_key in ("good_points", "next_steps", "practice_menu", "weak_tags", "reasons", "full_score_criteria"):
+        val = normalized.get(list_key)
+        if val is None:
+            continue
+        if isinstance(val, list):
+            continue
+        if isinstance(val, str):
+            chunks = [normalize_text(x) for x in re.split(r"[\n\r・•,，、;；]", val) if normalize_text(x)]
+            normalized[list_key] = chunks or [normalize_text(val)]
+        else:
+            normalized[list_key] = [str(val)]
+
+    rubric = normalized.get("rubric")
+    if rubric is None:
+        pass
+    elif isinstance(rubric, dict):
+        normalized["rubric"] = rubric
+    elif isinstance(rubric, str):
+        parsed_rubric, _ = parse_json_object_loose(rubric)
+        normalized["rubric"] = parsed_rubric if isinstance(parsed_rubric, dict) else {}
+    else:
+        normalized["rubric"] = {}
+
+    for key in ("next_step", "rewrite_tip", "short_comment", "best_sentence", "commentary"):
+        if key in normalized and normalized.get(key) is not None and not isinstance(normalized.get(key), str):
+            normalized[key] = str(normalized.get(key))
+
+    return normalized
+
+
 def short_text(s: Any, limit: int = 200) -> str:
     txt = normalize_text(str(s or ""))
     if len(txt) <= limit:
@@ -754,9 +841,10 @@ def resolve_model_answer(payload: Dict[str, Any]) -> str:
 
 
 def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """JSON mode で採点し、JSONパース失敗時は最大2回リトライ（合計3試行）。"""
+    """採点レスポンスを堅牢にパースし、parse失敗時のみ1回だけ再試行する。"""
     last_text = ""
-    for attempt in range(1, 4):
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
         rsp = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=messages,
@@ -766,18 +854,27 @@ def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[O
         )
         text = (rsp.choices[0].message.content or "").strip()
         last_text = text
-        try:
-            return json.loads(text), text
-        except Exception:
+        parsed, source = parse_json_object_loose(text)
+        if isinstance(parsed, dict):
+            return normalize_grading_result_shape(parsed), text
+        append_jsonl(LOG_DIR / "grading.jsonl", {
+            "event": "grading_parse_failed",
+            "attempt": attempt,
+            "parse_source": source,
+            "raw_text": text[:4000],
+            "model": DEFAULT_MODEL,
+            "ts": now_ms(),
+        })
+        if attempt < max_attempts:
             append_jsonl(LOG_DIR / "grading.jsonl", {
-                "event": "grading_parse_failed",
+                "event": "grading_parse_retry_happened",
                 "attempt": attempt,
-                "raw_text": text[:4000],
+                "message": "retrying after parse failure",
                 "model": DEFAULT_MODEL,
                 "ts": now_ms(),
             })
-            if attempt >= 3:
-                return None, last_text
+            continue
+        return None, last_text
     return None, last_text
 
 
@@ -1957,7 +2054,11 @@ def grade_answer():
 
     if not isinstance(result, dict):
         _update_metrics("grade", False, t0)
-        return jsonify({"ok": False, "error": "grading_parse_failed"}), 502
+        return jsonify({
+            "ok": False,
+            "error": "grading_parse_failed",
+            "message": "採点結果の解析に失敗しました。時間をおいて再試行してください。"
+        }), 502
     if "score_total" not in result and "score" not in result:
         append_jsonl(LOG_DIR / "grading.jsonl", {
             "event": "grading_invalid_schema",
