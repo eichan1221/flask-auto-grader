@@ -211,6 +211,87 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "grading_invalid_schema")
 
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_schema_retry_recovers_and_returns_ok_true(self, mock_parse, *_):
+        mock_parse.side_effect = [
+            ({
+                "score_total": "N/A",
+                "good_points": ["A"],
+                "rubric": {"conclusion": 1, "logic": 1, "wording": 1},
+            }, ""),
+            ({
+                "score_total": 8,
+                "good_points": ["A", "B"],
+                "rubric": {"conclusion": 2, "logic": 2, "wording": 2},
+            }, ""),
+        ]
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["score_total"], 8)
+        self.assertIn("request_id", body)
+        self.assertEqual(mock_parse.call_count, 2)
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_schema_retry_still_fails_returns_ok_false(self, mock_parse, *_):
+        mock_parse.side_effect = [
+            ({
+                "score_total": "N/A",
+                "good_points": ["A"],
+                "rubric": {"conclusion": 1, "logic": 1, "wording": 1},
+            }, ""),
+            ({
+                "score_total": "N/A",
+                "good_points": ["A"],
+                "rubric": {"conclusion": 1, "logic": 1, "wording": 1},
+            }, ""),
+        ]
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 502)
+        body = res.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"], "grading_invalid_schema")
+        self.assertIn("request_id", body)
+        self.assertEqual(mock_parse.call_count, 2)
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.append_jsonl")
+    @patch("app.parse_grading_response_with_retry")
+    def test_schema_retry_emits_retry_event_log(self, mock_parse, mock_log, *_):
+        mock_parse.side_effect = [
+            ({
+                "score_total": "N/A",
+                "good_points": ["A"],
+                "rubric": {"conclusion": 1, "logic": 1, "wording": 1},
+            }, ""),
+            ({
+                "score_total": 8,
+                "good_points": ["A", "B"],
+                "rubric": {"conclusion": 2, "logic": 2, "wording": 2},
+            }, ""),
+        ]
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点", rewrite_count=1))
+        self.assertEqual(res.status_code, 200)
+
+        records = [call.args[1] for call in mock_log.call_args_list if call.args and call.args[0].name == "grading.jsonl"]
+        retry_logs = [r for r in records if r.get("event") == "grade_answer_schema_retry"]
+        self.assertTrue(retry_logs)
+        event = retry_logs[-1]
+        self.assertEqual(event.get("reason"), "invalid_score")
+        self.assertEqual(event.get("attempt"), 1)
+        self.assertEqual(event.get("max_score"), 10)
+        self.assertTrue(event.get("is_rewrite"))
+
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
     @patch("app.parse_grading_response_with_retry", return_value=(None, "not json"))

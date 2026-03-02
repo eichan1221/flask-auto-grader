@@ -799,6 +799,28 @@ def _append_grade_error_log(
     append_jsonl(LOG_DIR / "grading.jsonl", payload)
 
 
+def _append_grade_schema_retry_log(
+    *,
+    request_id: str,
+    reason: str,
+    attempt: int,
+    max_score: Optional[int],
+    is_rewrite: bool,
+    user_id_masked: str,
+):
+    append_jsonl(LOG_DIR / "grading.jsonl", {
+        "event": "grade_answer_schema_retry",
+        "request_id": request_id,
+        "reason": reason,
+        "attempt": attempt,
+        "max_score": max_score,
+        "is_rewrite": bool(is_rewrite),
+        "user_id_masked": user_id_masked,
+        "model": DEFAULT_MODEL,
+        "ts": now_ms(),
+    })
+
+
 def _grade_error_response(*, request_id: str, error_type: str, http_status: int, message: Optional[str] = None, **extra):
     body: Dict[str, Any] = {
         "ok": False,
@@ -1011,16 +1033,20 @@ def resolve_model_answer(payload: Dict[str, Any]) -> str:
     return normalize_text(payload.get("model_answer", ""))[:2000]
 
 
-def parse_grading_response_with_retry(messages: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def parse_grading_response_with_retry(
+    messages: List[Dict[str, str]],
+    *,
+    temperature: float = 0.2,
+    max_attempts: int = 2,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """採点レスポンスを堅牢にパースし、parse失敗時のみ1回だけ再試行する。"""
     last_text = ""
-    max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         rsp = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=messages,
             response_format={"type": "json_object"},
-            temperature=0.2,
+            temperature=temperature,
             max_tokens=MAX_TOKENS_GRADE,
         )
         text = (rsp.choices[0].message.content or "").strip()
@@ -1215,7 +1241,7 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
 
-def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = False) -> List[Dict[str, str]]:
     q = payload["question"]
     sa = payload["student_answer"]
     ma = payload.get("model_answer", "")
@@ -1251,6 +1277,11 @@ def build_grading_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "score_total が配点上限に相当する満点の場合は、改善提案を出さず称賛のみを返す。"
         "日本語で丁寧かつ簡潔に。"
     )
+    if strict_schema:
+        sysprompt += (
+            " score_total は必ず数値で返し、文字列（例: N/A, 不明, 10/10）を使わないこと。"
+            f" score_total は 0〜{max_score} の整数のみ許可。"
+        )
     usr = (
         f"問題: {q}\n"
         f"受験者の解答: {sa}\n"
@@ -2275,6 +2306,7 @@ def grade_answer():
 
     data["model_answer"] = resolve_model_answer(data)
     messages = build_grading_messages(data)
+
     try:
         # 用途: 採点（採点・講評・改善提案）
         result, ai_raw_text = parse_grading_response_with_retry(messages)
@@ -2304,34 +2336,78 @@ def grade_answer():
         )
         return _grade_error_response(request_id=request_id, error_type="grading_parse_failed", http_status=502)
 
-    result = normalize_grading_result_shape(result)
+    schema_retry_done = False
+    score_total_raw = None
+    while True:
+        result = normalize_grading_result_shape(result)
+        if "score_total" not in result:
+            if not schema_retry_done:
+                schema_retry_done = True
+                _append_grade_schema_retry_log(
+                    request_id=request_id,
+                    reason="missing_score_total",
+                    attempt=1,
+                    max_score=max_score_for_log,
+                    is_rewrite=is_rewrite,
+                    user_id_masked=user_id_masked,
+                )
+                try:
+                    result, ai_raw_text = parse_grading_response_with_retry(
+                        build_grading_messages(data, strict_schema=True),
+                        temperature=0.0,
+                        max_attempts=1,
+                    )
+                except Exception as e:
+                    _update_metrics("grade", False, t0)
+                    _append_grade_error_log(
+                        request_id=request_id,
+                        error_type="upstream_error",
+                        http_status=502,
+                        max_score=max_score_for_log,
+                        is_rewrite=is_rewrite,
+                        user_id_masked=user_id_masked,
+                        ai_response_excerpt=str(e),
+                    )
+                    return _grade_error_response(request_id=request_id, error_type="upstream_error", http_status=502)
+                if not isinstance(result, dict):
+                    _update_metrics("grade", False, t0)
+                    _append_grade_error_log(
+                        request_id=request_id,
+                        error_type="grading_parse_failed",
+                        http_status=502,
+                        max_score=max_score_for_log,
+                        is_rewrite=is_rewrite,
+                        user_id_masked=user_id_masked,
+                        ai_response_excerpt=ai_raw_text,
+                    )
+                    return _grade_error_response(request_id=request_id, error_type="grading_parse_failed", http_status=502)
+                continue
+            _update_metrics("grade", False, t0)
+            _append_grade_error_log(
+                request_id=request_id,
+                error_type="grading_invalid_schema",
+                http_status=502,
+                max_score=max_score_for_log,
+                is_rewrite=is_rewrite,
+                user_id_masked=user_id_masked,
+                schema_error_detail={
+                    "reason": "missing_score_total",
+                    "expected": "score_total",
+                    "actual_keys": sorted(list(result.keys()))[:30],
+                },
+                normalize_summary={
+                    "score_candidates": {
+                        "score": short_text(result.get("score", ""), 40),
+                        "grade": short_text(result.get("grade", ""), 40),
+                        "points": short_text(result.get("points", ""), 40),
+                    }
+                },
+                ai_response_excerpt=ai_raw_text,
+            )
+            return _grade_error_response(request_id=request_id, error_type="grading_invalid_schema", http_status=502)
 
-    if "score_total" not in result:
-        _update_metrics("grade", False, t0)
-        _append_grade_error_log(
-            request_id=request_id,
-            error_type="grading_invalid_schema",
-            http_status=502,
-            max_score=max_score_for_log,
-            is_rewrite=is_rewrite,
-            user_id_masked=user_id_masked,
-            schema_error_detail={
-                "reason": "missing_score_total",
-                "expected": "score_total",
-                "actual_keys": sorted(list(result.keys()))[:30],
-            },
-            normalize_summary={
-                "score_candidates": {
-                    "score": short_text(result.get("score", ""), 40),
-                    "grade": short_text(result.get("grade", ""), 40),
-                    "points": short_text(result.get("points", ""), 40),
-                }
-            },
-            ai_response_excerpt=ai_raw_text,
-        )
-        return _grade_error_response(request_id=request_id, error_type="grading_invalid_schema", http_status=502)
-
-    score_total_raw = result.get("score_total")
+        score_total_raw = result.get("score_total")
+        break
 
     good_points = normalize_string_list(
         result.get("good_points", []),
@@ -2389,6 +2465,50 @@ def grade_answer():
         score_total_raw = max_score
 
     score_total_scaled, score_total_base10, normalize_reason = normalize_score_value(score_total_raw, max_score)
+    if (score_total_scaled is None or score_total_base10 is None) and not schema_retry_done:
+        schema_retry_done = True
+        _append_grade_schema_retry_log(
+            request_id=request_id,
+            reason=normalize_reason,
+            attempt=1,
+            max_score=max_score,
+            is_rewrite=is_rewrite,
+            user_id_masked=user_id_masked,
+        )
+        try:
+            result, ai_raw_text = parse_grading_response_with_retry(
+                build_grading_messages(data, strict_schema=True),
+                temperature=0.0,
+                max_attempts=1,
+            )
+        except Exception as e:
+            _update_metrics("grade", False, t0)
+            _append_grade_error_log(
+                request_id=request_id,
+                error_type="upstream_error",
+                http_status=502,
+                max_score=max_score,
+                is_rewrite=is_rewrite,
+                user_id_masked=user_id_masked,
+                ai_response_excerpt=str(e),
+            )
+            return _grade_error_response(request_id=request_id, error_type="upstream_error", http_status=502)
+        if not isinstance(result, dict):
+            _update_metrics("grade", False, t0)
+            _append_grade_error_log(
+                request_id=request_id,
+                error_type="grading_parse_failed",
+                http_status=502,
+                max_score=max_score,
+                is_rewrite=is_rewrite,
+                user_id_masked=user_id_masked,
+                ai_response_excerpt=ai_raw_text,
+            )
+            return _grade_error_response(request_id=request_id, error_type="grading_parse_failed", http_status=502)
+        result = normalize_grading_result_shape(result)
+        score_total_raw = result.get("score_total")
+        score_total_scaled, score_total_base10, normalize_reason = normalize_score_value(score_total_raw, max_score)
+
     if score_total_scaled is None or score_total_base10 is None:
         _update_metrics("grade", False, t0)
         _append_grade_error_log(

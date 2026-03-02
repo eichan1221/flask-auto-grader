@@ -1140,6 +1140,8 @@
     let scoreHistory = [];
     let rubricHistory = [];
     let aiTeacherMessages = [];
+    let gradingInFlight = false;
+    let generatingInFlight = false;
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -1535,6 +1537,10 @@
     }
 
     async function handleGenerate(){
+      if(generatingInFlight){
+        toast('問題を生成中です…', false); return;
+      }
+      generatingInFlight = true;
       const payload = {
         subject,
         category: $('#category').value,
@@ -1572,6 +1578,7 @@
         }
         refreshUsage();
       }finally{
+        generatingInFlight = false;
         btn.disabled = false; btn.textContent = txt;
       }
     }
@@ -2165,7 +2172,12 @@
     // 2) 同じ問題でリライト→再採点を最低3回実行
     // 3) 失敗時はサーバの logs/grading.jsonl に raw_text が出ることを確認
     async function handleGrade(){
+      if(gradingInFlight){
+        toast('採点中です…', false); return;
+      }
+      gradingInFlight = true;
       if(!currentItem || !currentItem.question){
+        gradingInFlight = false;
         toast('先に問題を選ぶか生成してください', false); return;
       }
       if(lastGradeQuestion === currentItem.question){
@@ -2189,6 +2201,7 @@
         body.model_answer = currentItem.model_answer;
       }
       if(!body.student_answer.trim()){
+        gradingInFlight = false;
         toast('解答を入力してください', false); return;
       }
       const btn = $('#btnGrade');
@@ -2310,6 +2323,7 @@
         }
         refreshUsage();
       }finally{
+        gradingInFlight = false;
         btn.disabled = false; btn.textContent = txt;
       }
     }
@@ -2579,6 +2593,10 @@
       const btn = e.target.closest('.action-btn');
       if(!btn) return;
       const action = btn.dataset.action;
+      if((action === 'grade' || action === 'rewrite') && gradingInFlight){
+        toast('採点中です…', false);
+        return;
+      }
       const map = {
         grade: '#btnGrade',
         rewrite: '#btnRewrite',
