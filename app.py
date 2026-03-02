@@ -807,8 +807,10 @@ def _append_grade_schema_retry_log(
     max_score: Optional[int],
     is_rewrite: bool,
     user_id_masked: str,
+    actual_keys: Optional[List[str]] = None,
+    score_total_raw: Any = None,
 ):
-    append_jsonl(LOG_DIR / "grading.jsonl", {
+    payload = {
         "event": "grade_answer_schema_retry",
         "request_id": request_id,
         "reason": reason,
@@ -818,7 +820,12 @@ def _append_grade_schema_retry_log(
         "user_id_masked": user_id_masked,
         "model": DEFAULT_MODEL,
         "ts": now_ms(),
-    })
+    }
+    if actual_keys:
+        payload["actual_keys"] = actual_keys[:30]
+    if score_total_raw is not None:
+        payload["score_total_raw"] = short_text(score_total_raw, 60)
+    append_jsonl(LOG_DIR / "grading.jsonl", payload)
 
 
 def _grade_error_response(*, request_id: str, error_type: str, http_status: int, message: Optional[str] = None, **extra):
@@ -1251,6 +1258,11 @@ def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = Fal
 
     sysprompt = (
         "あなたは中学生の記述解答を採点する試験官です。"
+        "最優先ルール: 出力は必ずJSONオブジェクトのみ（前置き・補足・コードブロック禁止）。"
+        "最優先ルール: 必須キーは score_total, good_points, next_step, rubric。"
+        f"最優先ルール: score_total は 0〜{max_score} の整数のみ（文字列・N/A・10/10形式は禁止）。"
+        "最優先ルール: rubric は conclusion/logic/wording を各0〜3の整数で返す。"
+        "判断に迷っても score_total を欠落させず、必ず整数で返すこと。"
         "採点は0〜10点の整数。"
         "参考解答と同等の内容であれば10点にしてください（満点例）。"
         "さらに『入試本番で満点（○）になる確率』を0〜100の整数で推定し、"
@@ -1276,6 +1288,7 @@ def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = Fal
         "practice_menu は1〜3個、すぐできる練習メニューにする。"
         "score_total が配点上限に相当する満点の場合は、改善提案を出さず称賛のみを返す。"
         "日本語で丁寧かつ簡潔に。"
+        'JSON例: {"score_total":7,"good_points":["結論が明確","理由が書けている"],"next_step":"結論→理由→具体例を1文でまとめる","rubric":{"conclusion":2,"logic":2,"wording":2}}'
     )
     if strict_schema:
         sysprompt += (
@@ -1291,6 +1304,35 @@ def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = Fal
     )
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
+
+
+def build_grading_schema_repair_messages(
+    payload: Dict[str, Any],
+    *,
+    reason: str,
+    score_total_raw: Any = None,
+    actual_keys: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
+    base_messages = build_grading_messages(payload, strict_schema=True)
+    max_score = difficulty_max_score(payload.get("difficulty", "10点"))
+    keys_preview = ",".join((actual_keys or [])[:12])
+    raw_preview = short_text(score_total_raw, 40)
+    repair_prompt = (
+        "直前の出力はスキーマ違反でした。"
+        "必須キー欠落または型違いはエラー扱いです。"
+        "今回の出力は必ずJSONオブジェクトのみを返し、余計な文章を一切出力しないでください。"
+        "必須: score_total（整数）, rubric（conclusion/logic/wording の0〜3整数）,"
+        "good_points（配列2件）, next_step（文字列）。"
+        f"score_total は 0〜{max_score} の整数のみ。文字列・N/A・分数形式は禁止。"
+        "欠落や型違いが1つでもあれば不正解です。必ず全必須項目を満たしてください。"
+        'JSON例: {"score_total":7,"good_points":["結論が明確","理由が書けている"],"next_step":"結論→理由→具体例を1文でまとめる","rubric":{"conclusion":2,"logic":2,"wording":2}}'
+    )
+    detail_prompt = f"前回エラー理由: {reason} / keys: {keys_preview or '-'} / score_total_raw: {raw_preview or '-'}"
+    return [
+        {"role": "system", "content": repair_prompt},
+        {"role": "user", "content": detail_prompt},
+        base_messages[1],
+    ]
 
 
 def normalize_ask_ai_history(raw_history: Any, max_items: int = AI_CHAT_HISTORY_MAX_ITEMS) -> List[Dict[str, str]]:
@@ -2350,10 +2392,15 @@ def grade_answer():
                     max_score=max_score_for_log,
                     is_rewrite=is_rewrite,
                     user_id_masked=user_id_masked,
+                    actual_keys=sorted(list(result.keys()))[:30],
                 )
                 try:
                     result, ai_raw_text = parse_grading_response_with_retry(
-                        build_grading_messages(data, strict_schema=True),
+                        build_grading_schema_repair_messages(
+                            data,
+                            reason="missing_score_total",
+                            actual_keys=sorted(list(result.keys()))[:30],
+                        ),
                         temperature=0.0,
                         max_attempts=1,
                     )
@@ -2474,10 +2521,17 @@ def grade_answer():
             max_score=max_score,
             is_rewrite=is_rewrite,
             user_id_masked=user_id_masked,
+            actual_keys=sorted(list(result.keys()))[:30],
+            score_total_raw=score_total_raw,
         )
         try:
             result, ai_raw_text = parse_grading_response_with_retry(
-                build_grading_messages(data, strict_schema=True),
+                build_grading_schema_repair_messages(
+                    data,
+                    reason=normalize_reason,
+                    actual_keys=sorted(list(result.keys()))[:30],
+                    score_total_raw=score_total_raw,
+                ),
                 temperature=0.0,
                 max_attempts=1,
             )
