@@ -154,16 +154,20 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
     @patch("app.parse_grading_response_with_retry")
-    def test_missing_score_total_returns_error(self, mock_parse, *_):
-        mock_parse.return_value = ({"good_points": ["A"]}, "")
+    def test_missing_score_total_schema_retry_recovers(self, mock_parse, *_):
+        mock_parse.side_effect = [
+            ({"good_points": ["A"], "rubric": {"conclusion": 1, "logic": 1, "wording": 1}}, ""),
+            ({"score_total": 7, "good_points": ["A", "B"], "next_step": "具体例を足す", "rubric": {"conclusion": 2, "logic": 2, "wording": 2}}, ""),
+        ]
 
         res = self.client.post("/api/grade_answer", json=self._payload("10点"))
-        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.status_code, 200)
         body = res.get_json()
-        self.assertFalse(body["ok"])
-        self.assertEqual(body["error"], "grading_invalid_schema")
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["score_total"], 7)
         self.assertIn("request_id", body)
-
+        self.assertEqual(mock_parse.call_count, 2)
+        self.assertEqual(mock_parse.call_args_list[1].kwargs.get("temperature"), 0.0)
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
@@ -215,7 +219,7 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
     @patch("app.parse_grading_response_with_retry")
-    def test_schema_retry_recovers_and_returns_ok_true(self, mock_parse, *_):
+    def test_invalid_score_schema_retry_recovers_and_keeps_request_id(self, mock_parse, *_):
         mock_parse.side_effect = [
             ({
                 "score_total": "N/A",
@@ -225,6 +229,7 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
             ({
                 "score_total": 8,
                 "good_points": ["A", "B"],
+                "next_step": "具体例を1つ入れる",
                 "rubric": {"conclusion": 2, "logic": 2, "wording": 2},
             }, ""),
         ]
@@ -236,6 +241,10 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertEqual(body["score_total"], 8)
         self.assertIn("request_id", body)
         self.assertEqual(mock_parse.call_count, 2)
+        repair_messages = mock_parse.call_args_list[1].args[0]
+        self.assertEqual(repair_messages[0]["role"], "system")
+        self.assertIn("スキーマ違反", repair_messages[0]["content"])
+        self.assertEqual(mock_parse.call_args_list[1].kwargs.get("temperature"), 0.0)
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
@@ -291,6 +300,9 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
         self.assertEqual(event.get("attempt"), 1)
         self.assertEqual(event.get("max_score"), 10)
         self.assertTrue(event.get("is_rewrite"))
+        self.assertEqual(event.get("score_total_raw"), "N/A")
+        self.assertEqual(event.get("actual_keys"), ["good_points", "rubric", "score_total"])
+        self.assertEqual(event.get("request_id"), res.get_json().get("request_id"))
 
     @patch("app.ensure_openai", return_value=None)
     @patch("app.resolve_model_answer", return_value="")
