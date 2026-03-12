@@ -1012,6 +1012,10 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         last10_scores = []
     last10_scores = [int(x) for x in last10_scores[:10] if isinstance(x, (int, float, str)) and str(x).isdigit()]
     stock_id = normalize_text(p.get("stock_id", ""))[:64]
+    if stock_id:
+        stock_path = STOCK_DIR / f"{stock_id}.json"
+        if not stock_path.exists():
+            stock_id = ""
     return {
         "question": question,
         "student_answer": student_answer,
@@ -1168,6 +1172,43 @@ def normalize_full_score_feedback(response: Dict[str, Any], max_score: int) -> D
     ]
     response["optional_challenge"] = "余裕があれば、別の具体例でも同じ主張を説明してみよう。"
     return response
+
+
+def build_coaching_cards(rubric: Dict[str, int], answer: str) -> List[Dict[str, str]]:
+    """採点結果を次の行動に直結させる具体カードを返す。"""
+    cards: List[Dict[str, str]] = []
+    presets = {
+        "conclusion": {
+            "title": "結論の明確さ",
+            "problem": "問いに対する答えが最初の一文で言い切れていません。",
+            "action": "最初の一文を『〜は…である。』の形で書いてから理由を書き足しましょう。",
+            "example": "例：鎌倉幕府が成立した理由は、武士の力が強まったからである。",
+        },
+        "logic": {
+            "title": "理由の筋道",
+            "problem": "結論はありますが、理由と結果のつながりが弱いです。",
+            "action": "『なぜなら〜だから』を使って、原因→結果を1セット追加しましょう。",
+            "example": "例：なぜなら、平氏を倒した武士が政治の中心になったから。",
+        },
+        "wording": {
+            "title": "用語・表現",
+            "problem": "重要語句が少なく、採点で根拠が伝わりにくい状態です。",
+            "action": "教科書の重要語句を1つ入れて、主語を明確にしましょう。",
+            "example": "例：源頼朝が鎌倉に幕府を開き、武士による政治が始まった。",
+        },
+    }
+    for key in ("conclusion", "logic", "wording"):
+        if int(rubric.get(key, 0)) <= 1:
+            cards.append(presets[key])
+
+    if not cards:
+        cards.append({
+            "title": "あと一歩で高得点",
+            "problem": "大きな弱点はありません。細かい表現で減点されやすい段階です。",
+            "action": "結論→理由→具体例の順を保ったまま、字数を30〜80字に整えましょう。",
+            "example": "例：結論を先頭に置き、具体例を1つだけ入れると安定します。",
+        })
+    return cards[:3]
 
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
     """OpenAIとの疎通を軽く確認（5分キャッシュ／対象モデルのみ）"""
@@ -1581,18 +1622,21 @@ def root():
 # =========================
 @app.errorhandler(404)
 def _404(_e):
-    return jsonify({"ok": False, "error": "Not Found"}), 404
+    request_id = str(uuid.uuid4())
+    return jsonify({"ok": False, "error": "not_found", "message": "ページが見つかりません。URLをご確認ください。", "request_id": request_id}), 404
 
 @app.errorhandler(500)
 def _500(e):
+    request_id = str(uuid.uuid4())
     append_jsonl(LOG_DIR / "errors.jsonl", {
         "event": "server_error",
+        "request_id": request_id,
         "path": request.path,
         "method": request.method,
         "error": str(e),
         "ts": now_ms()
     })
-    return jsonify({"ok": False, "error": "Internal Server Error"}), 500
+    return jsonify({"ok": False, "error": "internal_server_error", "message": "サーバーでエラーが発生しました。時間をおいて再試行してください。", "request_id": request_id}), 500
 
 # =========================
 # 運用系
@@ -2170,7 +2214,15 @@ def generate_question():
             text = (rsp.choices[0].message.content or "").strip()
         except Exception as e:
             _update_metrics("generate", False, t0)
-            return jsonify({"ok": False, "error": f"OpenAI API error: {e}"}), 502
+            request_id = str(uuid.uuid4())
+            append_jsonl(LOG_DIR / "errors.jsonl", {
+                "event": "generate_question_error",
+                "request_id": request_id,
+                "path": "/api/generate_question",
+                "error": str(e),
+                "ts": now_ms(),
+            })
+            return jsonify({"ok": False, "error": "upstream_error", "message": "問題生成に失敗しました。再試行してください。", "request_id": request_id}), 502
 
         obj = parse_first_json_block(text) or {}
         question = normalize_text(obj.get("question", ""))[:2000]
@@ -2735,6 +2787,7 @@ def grade_answer():
         "last10_scores": data.get("last10_scores", []),
         "model": DEFAULT_MODEL,
         "request_id": request_id,
+        "coaching_cards": build_coaching_cards(rubric, data["student_answer"]),
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
 
