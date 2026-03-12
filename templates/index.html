@@ -10,12 +10,13 @@
 </head>
 <body>
   <header>
-    <div class="wrap toolbar">
+    <div class="wrap toolbar" id="topToolbar">
       <div class="flex" style="gap:10px">
         <h1>AI記述トレーナー</h1>
         <span id="modelTag" class="tag" aria-hidden="true">model: ...</span>
       </div>
-      <div class="flex" style="gap:8px;align-items:center">
+      <button class="btn small ghost mobile-toolbar-toggle" id="btnToggleTopActions" type="button" aria-expanded="false">メニュー</button>
+      <div class="flex top-actions" id="topActions" style="gap:8px;align-items:center">
         <div id="usageBadge" class="usage-badges" aria-live="polite">
           <span id="mainUsageBadge" class="pill small usage-pill">本編：あと --回</span>
           <span id="aiUsageBadge" class="pill small usage-pill">AI先生：あと --回</span>
@@ -37,11 +38,26 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
+    <div id="errorBanner" class="error-banner" style="display:none" role="alert"></div>
 
     <section class="purpose-card" aria-labelledby="purposeLeadTitle">
       <h2 id="purposeLeadTitle">この記述トレーナーの目的</h2>
       <p>この記述トレーナーは、社会や理科で出てくる用語や出来事の流れを、<strong>「説明できるレベル」まで理解すること</strong>を目的とした学習アプリです。<br>
       単語を覚えるだけで終わらず、意味・背景・つながりまで理解することで、得点力だけでなく、読解力や本質的な理解を育てます。</p>
+    </section>
+
+    <section class="card quickstart" id="quickStartCard" aria-labelledby="quickStartTitle">
+      <div class="toolbar">
+        <h2 id="quickStartTitle">はじめての人向け：まずはこの4ステップ</h2>
+        <button class="btn small" id="btnHideQuickStart" type="button">閉じる</button>
+      </div>
+      <ol class="quickstart-steps">
+        <li><strong>① 問題を読む</strong>（上の「問題文」に表示されます）</li>
+        <li><strong>② 解答を書く</strong>（すぐ下の解答欄に入力）</li>
+        <li><strong>③ 採点する</strong>（「採点する」ボタン）</li>
+        <li><strong>④ コメントを見て書き直す</strong>（「書き直して再採点する」）</li>
+      </ol>
+      <div class="small muted">迷ったら「模範解答」「解説・出題意図」タブを開いてください。</div>
     </section>
 
     <!-- 設定 -->
@@ -323,6 +339,10 @@
               <div>
                 <div class="small muted">次回ここだけ直そう</div>
                 <div id="nextStep" style="margin-top:6px"></div>
+                <div class="next-action-card" id="nextActionCard" style="display:none">
+                  <div class="caps">次にやること（1つだけ）</div>
+                  <div id="nextActionText"></div>
+                </div>
               </div>
             </div>
             <div class="summary-continue" id="continueScoreCard">
@@ -361,6 +381,7 @@
                 <div class="tab-panel active" id="tabCommentary">
                   <div class="small muted" style="margin-top:10px">講評</div>
                   <div id="commentary" style="margin:6px 0 8px"></div>
+                  <div id="coachingCards" class="coaching-cards"></div>
                 </div>
 
                 <div class="tab-panel" id="tabModel">
@@ -1061,6 +1082,8 @@
         }
         const err = new Error(msg);
         err.status = res.status;
+        err.requestId = data?.request_id || "";
+        err.raw = data || null;
         throw err;
       }
       return data || {};
@@ -1072,6 +1095,24 @@
       t.style.background = ok ? '#111827' : '#ef4444';
       t.classList.add('show');
       setTimeout(()=>t.classList.remove('show'), 2200);
+    }
+
+    function showErrorBanner(message, requestId=''){
+      const el = $('#errorBanner');
+      if(!el) return;
+      el.style.display = '';
+      el.innerHTML = `<strong>エラー:</strong> ${escapeHtml(message)} ${requestId ? `<span class="mono">(request_id: ${escapeHtml(requestId)})</span>` : ''} <button class="btn small" id="btnRetryFromError" type="button">再試行</button>`;
+      const retry = $('#btnRetryFromError');
+      if(retry){
+        retry.onclick = ()=> window.location.reload();
+      }
+    }
+
+    function hideErrorBanner(){
+      const el = $('#errorBanner');
+      if(!el) return;
+      el.style.display = 'none';
+      el.innerHTML = '';
     }
 
     async function postFeedback(payload){
@@ -1506,6 +1547,12 @@
       refreshUsage();
       refreshStockSummary();
 
+      const quickStartDismissed = localStorage.getItem("quickstart_dismissed_v1");
+      if(quickStartDismissed){
+        const qs = $("#quickStartCard");
+        if(qs) qs.style.display = "none";
+      }
+
       const studyTipsSeenKey = 'studyTips_seen_v1';
       try{
         if(!localStorage.getItem(studyTipsSeenKey)){
@@ -1567,14 +1614,15 @@
         renderGenerated(item, res.duplicate_of);
         refreshStockSummary();
         await refreshUsage();
+        hideErrorBanner();
         toast('問題を生成しました');
-        scrollToAnswer(true);
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
           toast(e.message || '本日の本編利用上限に達しました。明日リセットされます。', false);
         }else{
           toast('生成に失敗しました: ' + e.message, false);
+          showErrorBanner(e.message, e.requestId || '');
         }
         refreshUsage();
       }finally{
@@ -1586,6 +1634,9 @@
     function renderGenerated(item, dupOf){
       $('#genResult').style.display = '';
       $('#genQuestion').textContent = item.question || '(empty)';
+      $('#currentQuestionText').textContent = item.question || '';
+      renderHintLikeText($('#currentExpl'), item.explanation || '');
+      renderHintLikeText($('#currentIntn'), item.intention || '');
       renderHintLikeText($('#genExplanation'), item.explanation || '');
       renderHintLikeText($('#genIntention'), item.intention || '');
       const tags = item.tags || [];
@@ -1763,6 +1814,7 @@
       applyScienceConstraints();
 
       scrollToAnswer(true);
+      hideErrorBanner();
       toast('採点対象にセットしました');
     }
 
@@ -2232,6 +2284,17 @@
         }
 
         $('#commentary').textContent = r.commentary || '';
+        const ccWrap = $('#coachingCards');
+        if(ccWrap){
+          ccWrap.innerHTML = '';
+          const cards = Array.isArray(r.coaching_cards) ? r.coaching_cards : [];
+          cards.forEach(c=>{
+            const div = document.createElement('div');
+            div.className = 'coaching-card';
+            div.innerHTML = `<div class="small muted">${escapeHtml(c.title || '改善ポイント')}</div><ul><li><b>問題点:</b> ${escapeHtml(c.problem || '')}</li><li><b>改善方法:</b> ${escapeHtml(c.action || '')}</li><li><b>修正例:</b> ${escapeHtml(c.example || '')}</li></ul>`;
+            ccWrap.appendChild(div);
+          });
+        }
         const modelText = (r.model_answer || '').trim();
         $('#gradedModel').textContent = modelText || '（未設定）';
 
@@ -2254,6 +2317,13 @@
               ? '満点達成！'
               : `満点（○）になる確率: ${prob}%${note ? `（${note}）` : ''}`;
           }
+        }
+
+        const naCard = $('#nextActionCard');
+        const naText = $('#nextActionText');
+        if(naCard && naText){
+          naCard.style.display = r?.is_perfect_score ? 'none' : '';
+          naText.textContent = r?.is_perfect_score ? '' : (r.next_step || 'コメントを見て、1文だけ書き直して再採点しましょう。');
         }
 
         const weakTags = Array.isArray(r.weak_tags) ? r.weak_tags : [];
@@ -2312,14 +2382,15 @@
         addHistoryEntry(r.score_total ?? r.score ?? 0, r.max_score ?? difficultyToMaxPoints(body.difficulty), r.rubric);
         updateAssistStatus();
         await refreshUsage();
+        hideErrorBanner();
         toast('採点しました');
-        scrollToResult();
       }catch(e){
         console.error(e);
         if(e.code === 'quota_exceeded'){
           toast(e.message || '本日の本編利用上限に達しました。明日リセットされます。', false);
         }else{
           toast('採点に失敗しました: ' + e.message, false);
+          showErrorBanner(e.message, e.requestId || '');
         }
         refreshUsage();
       }finally{
@@ -2456,6 +2527,18 @@
     $('#btnReload').onclick = boot;
 
     $('#btnHowto')?.addEventListener('click', openHowto);
+    $('#btnHideQuickStart')?.addEventListener('click', ()=>{
+      const qs = $('#quickStartCard');
+      if(qs) qs.style.display = 'none';
+      localStorage.setItem('quickstart_dismissed_v1', '1');
+    });
+    $('#btnToggleTopActions')?.addEventListener('click', ()=>{
+      const wrap = $('#topActions');
+      const btn = $('#btnToggleTopActions');
+      if(!wrap || !btn) return;
+      const open = wrap.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
     $('#btnHowtoClose')?.addEventListener('click', closeHowto);
     $('#howtoModal')?.addEventListener('click', (e)=>{
       if(e.target === e.currentTarget) closeHowto();
