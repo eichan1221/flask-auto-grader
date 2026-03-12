@@ -128,6 +128,8 @@ ALLOWED_CAT_BY_SUBJECT = {
 }
 ALLOWED_GRADES = {"中1", "中2", "中3"}
 ALLOWED_DIFFICULTY = {"10点", "満点"}  # 生成/採点は10点・100点のみ
+ALLOWED_EXAM_STYLE = {"定期テスト", "高校入試", "基礎確認"}
+ALLOWED_LEARNER_PHASE = {"starter", "standard", "challenge"}
 
 # メトリクス
 METRICS = {
@@ -211,6 +213,8 @@ def enrich_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
         max_points_int = difficulty_max_score(difficulty)
     max_points_int = max(1, max_points_int)
     enriched["max_points"] = max_points_int
+    enriched["exam_style"] = exam_style_label(normalize_text(enriched.get("exam_style", "定期テスト"))[:20])
+    enriched["learner_phase"] = learner_phase_label(normalize_text(enriched.get("learner_phase", "standard"))[:20])
     return enriched
 
 def current_stocks() -> List[Dict[str, Any]]:
@@ -366,6 +370,152 @@ def difficulty_max_score(difficulty: str) -> int:
 
 def difficulty_label(difficulty: str) -> str:
     return f"{difficulty_max_score(difficulty)}点"
+
+def exam_style_label(style: str) -> str:
+    if style in ALLOWED_EXAM_STYLE:
+        return style
+    return "定期テスト"
+
+
+def learner_phase_label(phase: str) -> str:
+    if phase in ALLOWED_LEARNER_PHASE:
+        return phase
+    return "standard"
+
+
+def infer_learner_phase(rewrite_count: int, last10_scores: List[int], max_score: int) -> str:
+    normalized: List[float] = []
+    for score in last10_scores[-5:]:
+        try:
+            n = max(0.0, min(10.0, float(score) * 10 / max(max_score, 1)))
+        except Exception:
+            n = 0.0
+        normalized.append(n)
+    avg = (sum(normalized) / len(normalized)) if normalized else 0.0
+    if rewrite_count <= 1 and (not normalized or avg <= 6.0):
+        return "starter"
+    if avg >= 8.5 and rewrite_count >= 1:
+        return "challenge"
+    return "standard"
+
+
+def prioritize_reason_lines(reasons: List[str]) -> List[str]:
+    ordered = [normalize_text(r) for r in reasons if normalize_text(r)]
+    if not ordered:
+        return []
+
+    priority_patterns = [
+        r"最初の一文|結論|言い切",
+        r"理由|なぜ|因果|つなが",
+        r"具体例|キーワード|用語|語句",
+        r"字数|30|80|一文",
+    ]
+
+    scored = []
+    for idx, text in enumerate(ordered):
+        rank = len(priority_patterns)
+        for p_idx, pattern in enumerate(priority_patterns):
+            if re.search(pattern, text):
+                rank = p_idx
+                break
+        scored.append((rank, idx, text))
+
+    scored.sort(key=lambda x: (x[0], x[1]))
+    seen = set()
+    unique: List[str] = []
+    for _, _, line in scored:
+        if line in seen:
+            continue
+        seen.add(line)
+        unique.append(line)
+    return unique[:6]
+
+
+def normalize_guidance_tone(text: str, default_text: str) -> str:
+    t = normalize_text(text)
+    if not t:
+        return default_text
+    replacements = {
+        "不足": "足りない",
+        "網羅": "おさえる",
+        "妥当": "自然",
+        "明瞭": "わかりやすい",
+        "簡潔": "短く",
+        "記載": "書く",
+    }
+    for src, dst in replacements.items():
+        t = t.replace(src, dst)
+    if len(t) > 120:
+        t = t[:120]
+    return t
+
+
+def build_rewrite_checkpoint(rubric: Dict[str, int], next_step: str, rewrite_tip: str, answer: str) -> List[str]:
+    checkpoints: List[str] = []
+    answer_len = len(normalize_text(answer))
+
+    if int(rubric.get("conclusion", 0)) <= 1:
+        checkpoints.append("1文目で答えを言い切る（『〜だからである』の形にする）")
+    else:
+        checkpoints.append("1文目で答えを先に言う（結論ファーストを維持）")
+
+    if int(rubric.get("logic", 0)) <= 1:
+        checkpoints.append("『なぜなら〜だから』で理由を1つ足す")
+    else:
+        checkpoints.append("結論と理由のつながりを1回読み直して確認する")
+
+    if int(rubric.get("wording", 0)) <= 1:
+        checkpoints.append("教科書の重要語句を1つ入れる")
+    else:
+        checkpoints.append("主語を明確にして、あいまいな言葉を減らす")
+
+    if answer_len < 30:
+        checkpoints.append("短すぎるので、具体例を1つ足して30字以上にする")
+    elif answer_len > 90:
+        checkpoints.append("長すぎるので、結論→理由→具体例の順で80字前後に整理する")
+    else:
+        checkpoints.append("字数は適切。不要な言い換えを削って読みやすくする")
+
+    if normalize_text(next_step):
+        checkpoints.append(f"次の1手: {normalize_guidance_tone(next_step, next_step)}")
+    if normalize_text(rewrite_tip):
+        checkpoints.append(f"書き直しヒント: {normalize_guidance_tone(rewrite_tip, rewrite_tip)}")
+
+    seen = set()
+    out: List[str] = []
+    for c in checkpoints:
+        c = normalize_text(c)
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
+    return out[:5]
+
+
+def build_score_guide(score: int, max_score: int) -> Dict[str, Any]:
+    if max_score <= 0:
+        max_score = 10
+    pct = int(round(score * 100 / max_score))
+    if pct >= 95:
+        level = "満点"
+        guide = "満点です。次回も同じ型（結論→理由→具体例）を再現できれば安定します。"
+    elif pct >= 80:
+        level = "高得点"
+        guide = "あと1点の調整で満点が狙えます。語句の正確さと1文目の言い切りを確認しましょう。"
+    elif pct >= 60:
+        level = "合格ライン"
+        guide = "方向性は合っています。次は『理由を1つ増やす』か『語句を1つ足す』のどちらかに絞ると伸びます。"
+    else:
+        level = "伸びしろ大"
+        guide = "今は土台づくりの段階です。まずは1文目で答えを言い切ることだけを目標にしましょう。"
+
+    return {
+        "level": level,
+        "percent": pct,
+        "message": guide,
+        "high_score_target": "8/10以上（100点配点では80点以上）で高得点",
+        "perfect_target": "10/10（100点配点では100点）で満点",
+    }
 
 def parse_first_json_block(text: str) -> Dict[str, Any]:
     # モデル出力がJSON以外を含む場合の保険（最初の { ... } を抽出）
@@ -972,6 +1122,8 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
     avoid = normalize_text(p.get("avoid_topics", ""))[:120]
     length_hint = normalize_text(p.get("length_hint", "30〜80字程度"))[:40]
     include_hints = bool(p.get("include_hints", True))
+    exam_style = exam_style_label(normalize_text(p.get("exam_style", "定期テスト"))[:20])
+    learner_phase = learner_phase_label(normalize_text(p.get("learner_phase", "standard"))[:20])
     return {
         "subject": subject,
         "category": category,
@@ -984,6 +1136,8 @@ def validate_generation_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "avoid_topics": avoid,
         "length_hint": length_hint,
         "include_hints": include_hints,
+        "exam_style": exam_style,
+        "learner_phase": learner_phase,
     }
 
 def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -1016,6 +1170,9 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         stock_path = STOCK_DIR / f"{stock_id}.json"
         if not stock_path.exists():
             stock_id = ""
+    learner_phase = learner_phase_label(normalize_text(p.get("learner_phase", ""))[:20])
+    if learner_phase == "standard":
+        learner_phase = infer_learner_phase(rewrite_count, last10_scores, requested_max_score or difficulty_max_score(difficulty))
     return {
         "question": question,
         "student_answer": student_answer,
@@ -1027,6 +1184,7 @@ def validate_grading_payload(p: Dict[str, Any]) -> Dict[str, Any]:
         "selected_full_score": selected_full_score,
         "last10_scores": last10_scores,
         "stock_id": stock_id,
+        "learner_phase": learner_phase,
     }
 
 
@@ -1240,6 +1398,8 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     genre_hint = payload["genre_hint"]
     avoid = payload["avoid_topics"]
     length_hint = payload["length_hint"]
+    exam_style = exam_style_label(payload.get("exam_style", "定期テスト"))
+    learner_phase = learner_phase_label(payload.get("learner_phase", "standard"))
 
     recent = recent_tags()
     if recent:
@@ -1271,6 +1431,8 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         f"難易度/配点: {difficulty_label(difficulty)}\n"
         f"単元（任意）: {unit or '特になし'}\n"
         f"出題の方向性（任意）: {genre_hint or '特になし'}\n"
+        f"想定シーン: {exam_style}\n"
+        f"学習フェーズ: {learner_phase}（starter=初回向け, standard=通常, challenge=発展）\n"
         f"観点ローテ（直近回避）: {angle['label']}（{angle['hint']}）\n"
         f"避ける話題（任意）: {avoid or '特になし'}\n"
         f"解答分量の目安: {length_hint}\n\n"
@@ -1278,6 +1440,8 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "1) テキストのみで成立する記述問題を1問。\n"
         "   ・模範解答は30〜80字程度\n"
         "   ・『理由・因果・しくみ』を問う\n"
+        "   ・問いは1つに絞り、『何を書けばよいか』を明確にする\n"
+        "   ・中学生の定期テスト/高校入試で出ても違和感が少ない内容にする\n"
         "2) JSONで返す: {"
         '"question": str, "model_answer": str, "explanation": str, "intention": str, "tags": [str]'
         "}\n"
@@ -1285,6 +1449,7 @@ def build_generation_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         "   2〜4個の短い箇条書きで、少なくとも以下から2項目を含める: "
         "着眼点 / キーワード候補 / 考える順番 / 比較観点 / よくあるミス回避 / 書き出しの型。\n"
         "4) 同一テーマの連発を避ける\n"
+        "5) 学習フェーズがstarterのときは、成功体験を得やすい基本問題を優先し、比較より原因説明を優先する\n"
     )
     return [{"role": "system", "content": sysprompt},
             {"role": "user", "content": usr}]
@@ -1305,6 +1470,7 @@ def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = Fal
         "最優先ルール: rubric は conclusion/logic/wording を各0〜3の整数で返す。"
         "判断に迷っても score_total を欠落させず、必ず整数で返すこと。"
         "採点は0〜10点の整数。"
+        "参考解答と表現が異なっても、意味が一致していれば加点してください。"
         "参考解答と同等の内容であれば10点にしてください（満点例）。"
         "さらに『入試本番で満点（○）になる確率』を0〜100の整数で推定し、"
         "短い根拠を perfect_probability_note に書いてください。"
@@ -1321,11 +1487,11 @@ def build_grading_messages(payload: Dict[str, Any], *, strict_schema: bool = Fal
         "good_points は短い文を2つ、next_step は1つ。"
         "short_comment は1〜2行で簡潔に。"
         "best_sentence は受験者の解答から最も良い一文を抜粋。"
-        "reasons は3〜6個、箇条書きの短文。"
+        "reasons は3〜6個、箇条書きの短文。最初の2件は『次にどう直すか』が分かる具体文にする。"
         "full_score_criteria は満点に必要な要素を3つ程度、短く箇条書きで。"
         "full_score_example は満点になりやすい短い例文（参考解答と同等でも可）。"
         "next_step は「結論→理由→具体例1つ」で、30〜80字の1文にする。"
-        "next_steps は1〜3個、達成条件付きの具体的な手順にする。"
+        "next_steps は1〜3個、達成条件付きの具体的な手順にする。中学生でもすぐ実行できる語彙にする。"
         "practice_menu は1〜3個、すぐできる練習メニューにする。"
         "score_total が配点上限に相当する満点の場合は、改善提案を出さず称賛のみを返す。"
         "日本語で丁寧かつ簡潔に。"
@@ -2034,6 +2200,8 @@ def stock_add():
         "unit": unit,
         "difficulty": (data.get("difficulty", "10点") if data.get("difficulty", "10点") in ALLOWED_DIFFICULTY else "10点"),
         "max_points": difficulty_max_score(data.get("difficulty", "10点")),
+        "exam_style": exam_style_label(normalize_text(data.get("exam_style", "定期テスト"))[:20]),
+        "learner_phase": learner_phase_label(normalize_text(data.get("learner_phase", "standard"))[:20]),
         "tags": (data.get("tags", []) if isinstance(data.get("tags", []), list) else [])[:10],
         "source": "manual",
         "created_at": now_ms(),
@@ -2193,6 +2361,10 @@ def generate_question():
 
     payload_in = request.get_json(force=True, silent=True) or {}
     payload = validate_generation_payload(payload_in)
+    if payload.get("learner_phase") == "standard":
+        recent_for_phase = recent_questions(limit=3, subject=payload["subject"], category=payload["category"], grade=payload["grade"])
+        if len(recent_for_phase) <= 1:
+            payload["learner_phase"] = "starter"
     recent_qs = recent_questions(
         limit=10,
         subject=payload["subject"],
@@ -2306,6 +2478,8 @@ def generate_question():
         "unit": payload.get("unit", ""),
         "difficulty": payload["difficulty"],
         "max_points": payload["max_points"],
+        "exam_style": payload.get("exam_style", "定期テスト"),
+        "learner_phase": payload.get("learner_phase", "standard"),
         "created_at": now_ms(),
     }
     saved = save_stock_item(item)
@@ -2575,10 +2749,16 @@ def grade_answer():
     model_ans = (data.get("model_answer", "") or "").strip()
     full_score_example = (model_ans or result.get("full_score_example", "") or "").strip()
 
+    overlap_with_model = keyword_overlap_score(data["student_answer"], model_ans) if model_ans else 0.0
     if model_ans and is_high_match(data["student_answer"], model_ans, threshold=0.98):
         score_total_raw = max_score
 
     score_total_scaled, score_total_base10, normalize_reason = normalize_score_value(score_total_raw, max_score)
+    if score_total_scaled is not None and model_ans and overlap_with_model >= 0.62:
+        # 表現違いでも本質一致なら評価を少し救済する
+        boost = max(1, int(round(max_score * 0.08)))
+        score_total_scaled = min(max_score, max(score_total_scaled, score_total_scaled + boost))
+        score_total_base10 = int(round(score_total_scaled * 10 / max_score))
     if (score_total_scaled is None or score_total_base10 is None) and not schema_retry_done:
         schema_retry_done = True
         _append_grade_schema_retry_log(
@@ -2659,7 +2839,8 @@ def grade_answer():
     else:
         commentary = commentary_raw
 
-    reasons = normalize_string_list(result.get("reasons", []), limit=8, item_limit=200)
+    reasons_raw = normalize_string_list(result.get("reasons", []), limit=8, item_limit=200)
+    reasons = prioritize_reason_lines([normalize_guidance_tone(r, r) for r in reasons_raw])
 
     criteria = normalize_string_list(result.get("full_score_criteria", []), limit=5, item_limit=120)
     if not criteria:
@@ -2750,6 +2931,9 @@ def grade_answer():
     else:
         rubric_diff = {k: 0 for k in rubric.keys()}
 
+    rewrite_checkpoints = build_rewrite_checkpoint(rubric, next_step, rewrite_tip, data["student_answer"])
+    score_guide = build_score_guide(score_total_scaled, max_score)
+
     history = (session.get("next_step_history") or []) + [category]
     session["next_step_history"] = history[-5:]
 
@@ -2803,6 +2987,8 @@ def grade_answer():
         "model": DEFAULT_MODEL,
         "request_id": request_id,
         "coaching_cards": build_coaching_cards(rubric, data["student_answer"]),
+        "rewrite_checkpoints": rewrite_checkpoints,
+        "score_guide": score_guide,
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
 
@@ -2888,7 +3074,7 @@ def export_stocks_csv():
     tmp = DATA / "stocks_export.csv"
     fields = [
         "id", "subject", "domain", "category", "grade", "unit",
-        "difficulty", "max_points", "question", "question_text",
+        "difficulty", "max_points", "exam_style", "learner_phase", "question", "question_text",
         "model_answer", "explanation", "intention",
         "tags", "source", "created_at_iso"
     ]
@@ -2905,6 +3091,8 @@ def export_stocks_csv():
                 "unit": it.get("unit", ""),
                 "difficulty": it.get("difficulty", ""),
                 "max_points": it.get("max_points", ""),
+                "exam_style": it.get("exam_style", ""),
+                "learner_phase": it.get("learner_phase", ""),
                 "question": it.get("question", ""),
                 "question_text": it.get("question_text", ""),
                 "model_answer": it.get("model_answer", ""),

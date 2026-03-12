@@ -148,6 +148,22 @@
               <label>避ける話題（任意）</label>
               <input type="text" id="avoidTopics" placeholder="例：稲作は避けたい" maxlength="120">
             </div>
+            <div>
+              <label>想定シーン</label>
+              <select id="examStyle">
+                <option value="定期テスト" selected>定期テスト</option>
+                <option value="高校入試">高校入試</option>
+                <option value="基礎確認">基礎確認（初回向け）</option>
+              </select>
+            </div>
+            <div>
+              <label>出題フェーズ</label>
+              <select id="learnerPhase">
+                <option value="starter">starter（最初の数問向け）</option>
+                <option value="standard" selected>standard（通常）</option>
+                <option value="challenge">challenge（発展）</option>
+              </select>
+            </div>
             <div class="flex" style="align-items:center">
               <label class="pill"><input type="checkbox" id="includeHints" checked> ヒント（解説・出題意図）も生成に含める</label>
             </div>
@@ -414,6 +430,17 @@
                 <div id="nextStepsWrap" style="display:none;margin-top:10px">
                   <div class="small muted">次の一手（達成条件つき）</div>
                   <ul id="nextSteps" style="margin-top:4px"></ul>
+                </div>
+
+                <div id="rewriteCheckWrap" style="display:none;margin-top:10px">
+                  <div class="small muted">書き直しチェックリスト（この順でやる）</div>
+                  <ul id="rewriteCheckpoints" style="margin-top:4px"></ul>
+                </div>
+
+                <div id="scoreGuideWrap" class="flow-guide" style="display:none;margin-top:10px">
+                  <div id="scoreGuideLevel" style="font-weight:700"></div>
+                  <div id="scoreGuideMessage" style="margin-top:4px"></div>
+                  <div class="small muted" id="scoreGuideTargets" style="margin-top:4px"></div>
                 </div>
 
                 <div id="practiceMenuWrap" style="display:none;margin-top:10px">
@@ -999,6 +1026,9 @@
       const bestSentence = $('#bestSentence'); if(bestSentence) bestSentence.textContent = '';
       const rewriteTipWrap = $('#rewriteTipWrap'); if(rewriteTipWrap) rewriteTipWrap.style.display = 'none';
       const rewriteTip = $('#rewriteTip'); if(rewriteTip) rewriteTip.textContent = '';
+      const rewriteCheckWrap = $('#rewriteCheckWrap'); if(rewriteCheckWrap) rewriteCheckWrap.style.display = 'none';
+      const rewriteCheckpoints = $('#rewriteCheckpoints'); if(rewriteCheckpoints) rewriteCheckpoints.innerHTML = '';
+      const scoreGuideWrap = $('#scoreGuideWrap'); if(scoreGuideWrap) scoreGuideWrap.style.display = 'none';
       const improvementsWrap = $('#improvementsWrap'); if(improvementsWrap) improvementsWrap.style.display = 'none';
       const improvements = $('#improvements'); if(improvements) improvements.innerHTML = '';
       const rubricDiff = $('#rubricDiff'); if(rubricDiff) rubricDiff.innerHTML = '';
@@ -1625,6 +1655,8 @@
         avoid_topics: $('#avoidTopics').value,
         include_hints: $('#includeHints').checked,
         length_hint: $('#lengthHint').value || '30〜80字程度',
+        exam_style: $('#examStyle')?.value || '定期テスト',
+        learner_phase: $('#learnerPhase')?.value || 'standard',
       };
       const btn = $('#btnGenerate');
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '生成中…';
@@ -2364,6 +2396,8 @@
         const weakTags = Array.isArray(r.weak_tags) ? r.weak_tags : [];
         const nextSteps = Array.isArray(r.next_steps) ? r.next_steps : [];
         const practiceMenu = Array.isArray(r.practice_menu) ? r.practice_menu : [];
+        const rewriteChecks = Array.isArray(r.rewrite_checkpoints) ? r.rewrite_checkpoints : [];
+        const scoreGuide = (r && typeof r.score_guide === 'object') ? r.score_guide : null;
 
         const weakWrap = $('#weakTagsWrap');
         const weakBox = $('#weakTags');
@@ -2395,6 +2429,34 @@
             });
           }else{
             nsWrap.style.display = 'none';
+          }
+        }
+
+        const rcWrap = $('#rewriteCheckWrap');
+        const rcUl = $('#rewriteCheckpoints');
+        if(rcWrap && rcUl){
+          rcUl.innerHTML = '';
+          if(!r?.is_perfect_score && rewriteChecks.length){
+            rcWrap.style.display = '';
+            rewriteChecks.slice(0,5).forEach(s=>{
+              const li=document.createElement('li');
+              li.textContent = s;
+              rcUl.appendChild(li);
+            });
+          }else{
+            rcWrap.style.display = 'none';
+          }
+        }
+
+        const sgWrap = $('#scoreGuideWrap');
+        if(sgWrap){
+          if(scoreGuide && !r?.is_perfect_score){
+            sgWrap.style.display = '';
+            $('#scoreGuideLevel').textContent = `現在地: ${scoreGuide.level || '-'}`;
+            $('#scoreGuideMessage').textContent = scoreGuide.message || '';
+            $('#scoreGuideTargets').textContent = `目安: ${scoreGuide.high_score_target || ''} / ${scoreGuide.perfect_target || ''}`;
+          }else{
+            sgWrap.style.display = 'none';
           }
         }
 
