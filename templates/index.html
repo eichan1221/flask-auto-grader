@@ -38,7 +38,7 @@
   </header>
 
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
-    <div id="errorBanner" class="error-banner" style="display:none" role="alert"></div>
+    <div id="errorBanner" class="error-banner" style="display:none" role="alert" aria-live="assertive"></div>
 
     <section class="purpose-card" aria-labelledby="purposeLeadTitle">
       <h2 id="purposeLeadTitle">この記述トレーナーの目的</h2>
@@ -209,6 +209,7 @@
           <h2>② 採点</h2>
           <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
         </div>
+        <div class="flow-guide" id="flowGuide" aria-live="polite">問題を読む → 解答を書く → 採点する → コメントを見て書き直す</div>
 
         <!-- ✅ 追加：採点の観点（折りたたみ可能） -->
         <div class="qcard" id="rubricCard" style="margin-top:10px;">
@@ -872,11 +873,15 @@
 
     function escapeHtml(s){
       return String(s ?? '')
-        .replaceAll('&','&amp;')
-        .replaceAll('<','&lt;')
-        .replaceAll('>','&gt;')
-        .replaceAll('"','&quot;')
-        .replaceAll("'","&#39;");
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
+    }
+
+    function isMobileLayout(){
+      return window.matchMedia('(max-width: 700px)').matches;
     }
 
 
@@ -918,10 +923,12 @@
     }
 
     function scrollToAnswer(focus=false){
-      scrollToElement($('#studentAnswer'), focus);
+      if(isMobileLayout() && !focus) return;
+      scrollToElement($('#studentAnswer'), focus && !isMobileLayout());
     }
 
     function scrollToResult(){
+      if(isMobileLayout()) return;
       scrollToElement($('#resultHeader'));
     }
 
@@ -1032,14 +1039,23 @@
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {headers});
       if(!res.ok){
-        if(res.status === 403) throw new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
+        if(res.status === 403) {
+          const err = new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
+          err.status = 403;
+          throw err;
+        }
         let msg = `${res.status} ${res.statusText}`;
+        let requestId = '';
         try {
           const j = await res.json();
           if(j && j.error){ msg += `: ${j.error}`; }
           if(j && j.message && !msg.includes(j.message)){ msg += ` / ${j.message}`; }
+          if(j && j.request_id){ requestId = j.request_id; }
         } catch(e){}
-        throw new Error(msg);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.requestId = requestId;
+        throw err;
       }
       try{
         return await res.json();
@@ -1097,15 +1113,25 @@
       setTimeout(()=>t.classList.remove('show'), 2200);
     }
 
+    let lastRecoverAction = null;
+
     function showErrorBanner(message, requestId=''){
       const el = $('#errorBanner');
       if(!el) return;
       el.style.display = '';
-      el.innerHTML = `<strong>エラー:</strong> ${escapeHtml(message)} ${requestId ? `<span class="mono">(request_id: ${escapeHtml(requestId)})</span>` : ''} <button class="btn small" id="btnRetryFromError" type="button">再試行</button>`;
+      el.innerHTML = `<strong>エラーが発生しました:</strong> ${escapeHtml(message)} ${requestId ? `<span class="mono">（問い合わせID: ${escapeHtml(requestId)}）</span>` : ''} <button class="btn small" id="btnRetryFromError" type="button">もう一度試す</button> <button class="btn small" id="btnBackToAnswer" type="button">解答欄に戻る</button>`;
       const retry = $('#btnRetryFromError');
       if(retry){
-        retry.onclick = ()=> window.location.reload();
+        retry.onclick = ()=> {
+          if(typeof lastRecoverAction === 'function'){
+            lastRecoverAction();
+            return;
+          }
+          window.location.reload();
+        };
       }
+      const back = $('#btnBackToAnswer');
+      if(back) back.onclick = ()=> scrollToAnswer(true);
     }
 
     function hideErrorBanner(){
@@ -1603,6 +1629,7 @@
       const btn = $('#btnGenerate');
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '生成中…';
       try{
+        lastRecoverAction = ()=> handleGenerate();
         const res = await apiPost('/api/generate_question', payload);
         generatedRaw = res;
         let item = res.item || res.generated || {};
@@ -1615,6 +1642,7 @@
         refreshStockSummary();
         await refreshUsage();
         hideErrorBanner();
+        lastRecoverAction = null;
         toast('問題を生成しました');
       }catch(e){
         console.error(e);
@@ -1706,6 +1734,7 @@
         list.appendChild(errDiv);
         $('#stockModalCount').textContent = '';
         if(info) info.textContent = '';
+        showErrorBanner('ストック一覧の取得に失敗しました。時間をおいて再試行してください。', e.requestId || '');
       }
     }
 
@@ -1773,7 +1802,12 @@
           toast('候補が見つかりませんでした', false);
         }
       }catch(e){
+        if(e.status === 404){
+          toast('条件に合う問題がありません。条件をゆるめてください。', false);
+          return;
+        }
         toast('ランダム取得に失敗: ' + e.message, false);
+        showErrorBanner('次の問題の取得に失敗しました。再試行してください。', e.requestId || '');
       }
     }
 
@@ -2259,6 +2293,7 @@
       const btn = $('#btnGrade');
       btn.disabled = true; const txt = btn.textContent; btn.textContent = '採点中…';
       try{
+        lastRecoverAction = ()=> handleGrade();
         const r = await apiPost('/api/grade_answer', body);
         if(!r || r.ok === false){
           toast('採点に失敗しました。もう一度お試しください。', false);
@@ -2383,6 +2418,7 @@
         updateAssistStatus();
         await refreshUsage();
         hideErrorBanner();
+        lastRecoverAction = null;
         toast('採点しました');
       }catch(e){
         console.error(e);

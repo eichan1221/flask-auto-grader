@@ -448,6 +448,8 @@ textarea{min-height:120px;resize:vertical}
 
 
 .error-banner{
+  position:sticky;
+  top:8px;
   margin:0 0 12px;
   border:1px solid #fecaca;
   background:#fff1f2;
@@ -455,6 +457,15 @@ textarea{min-height:120px;resize:vertical}
   border-radius:12px;
   padding:10px 12px;
   z-index:100001;
+}
+.flow-guide{
+  margin:6px 0 0;
+  padding:8px 10px;
+  border:1px solid #e9d5ff;
+  border-radius:10px;
+  background:#faf5ff;
+  font-size:13px;
+  color:#5b21b6;
 }
 .quickstart{margin-bottom:12px;background:linear-gradient(180deg,#ffffff,#f8fbff)}
 .quickstart-steps{margin:4px 0 10px;padding-left:18px;line-height:1.9}
@@ -465,14 +476,26 @@ textarea{min-height:120px;resize:vertical}
 
 @media (max-width:700px){
   :root{--action-bar-height:58px}
-  header{position:sticky;top:0}
+  header{position:static;border-bottom:none;background:transparent;backdrop-filter:none}
+  .wrap{padding:12px}
+  main.wrap{padding-top:8px!important}
+  .row{display:flex;flex-direction:column;gap:12px}
+  #gradingSection{order:-1}
+  #gradingSection .toolbar{align-items:flex-start}
+  #gradingSection #btnExportGrading{display:none}
   .purpose-card{display:none}
   #topToolbar{align-items:flex-start}
   .mobile-toolbar-toggle{display:inline-flex}
   .top-actions{display:none;width:100%}
   .top-actions.open{display:flex}
+  .top-actions .btn{font-size:14px;min-height:40px;padding:8px 12px}
   .toolbar .usage-badges{width:100%}
   #btnStudyTips{padding:8px 12px;font-size:13px;animation:none}
+  #btnPurpose,#btnStudyTips,#btnReload{display:none}
+  #modelTag{display:none}
+  .qcard{padding:10px}
+  #studentAnswer{min-height:180px}
+  .error-banner{top:4px}
   .feedback-fab{bottom:calc(var(--action-bar-height) + 72px);right:12px;padding:10px 12px}
 }
 @media (min-width:701px){
