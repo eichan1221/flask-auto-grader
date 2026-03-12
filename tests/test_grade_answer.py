@@ -342,6 +342,21 @@ class GradeAnswerBehaviorTests(unittest.TestCase):
 
 
 class GradingParseRobustnessTests(unittest.TestCase):
+    def setUp(self):
+        grader_app.app.config["TESTING"] = True
+        grader_app._rate_bucket.clear()
+        grader_app.FREE_DAILY_MAIN_LIMIT = 9999
+        grader_app.FREE_DAILY_AI_LIMIT = 9999
+        self.client = grader_app.app.test_client()
+
+    def _payload(self, difficulty: str = "10点"):
+        return {
+            "question": "鎌倉幕府が成立した理由を説明しなさい。",
+            "student_answer": "武士が力を持ち、源頼朝が政治の中心を鎌倉に置いたから。",
+            "difficulty": difficulty,
+            "rewrite_count": 0,
+        }
+
     def test_parse_json_object_loose_accepts_plain_json(self):
         parsed, source = grader_app.parse_json_object_loose('{"score_total": 8, "good_points": ["A"]}')
         self.assertIsInstance(parsed, dict)
@@ -383,6 +398,40 @@ class GradingParseRobustnessTests(unittest.TestCase):
         self.assertIn("grading_parse_failed", events)
         self.assertIn("grading_parse_retry_happened", events)
 
+
+
+    @patch("app.ensure_openai", return_value=None)
+    @patch("app.resolve_model_answer", return_value="")
+    @patch("app.parse_grading_response_with_retry")
+    def test_response_has_rewrite_checkpoints_and_score_guide(self, mock_parse, *_):
+        mock_parse.return_value = ({
+            "score_total": 6,
+            "good_points": ["結論がある", "方向性は合っている"],
+            "next_step": "最初の一文で答えを言い切る",
+            "rewrite_tip": "なぜなら〜だからを入れる",
+            "short_comment": "次で伸びる",
+            "best_sentence": "武士が力を持った。",
+            "rubric": {"conclusion": 1, "logic": 1, "wording": 2},
+        }, "")
+
+        res = self.client.post("/api/grade_answer", json=self._payload("10点"))
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertIn("rewrite_checkpoints", body)
+        self.assertGreaterEqual(len(body["rewrite_checkpoints"]), 3)
+        self.assertIn("score_guide", body)
+        self.assertIn("level", body["score_guide"])
+
+    def test_validate_generation_payload_accepts_exam_style_and_phase(self):
+        payload = grader_app.validate_generation_payload({
+            "subject": "社会",
+            "category": "歴史",
+            "difficulty": "10点",
+            "exam_style": "高校入試",
+            "learner_phase": "starter",
+        })
+        self.assertEqual(payload["exam_style"], "高校入試")
+        self.assertEqual(payload["learner_phase"], "starter")
 
 if __name__ == "__main__":
     unittest.main()

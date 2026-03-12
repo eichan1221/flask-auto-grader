@@ -30,6 +30,7 @@ class HintQualityTests(unittest.TestCase):
         user_prompt = msgs[1]["content"]
         self.assertIn("問題文の言い換え禁止", user_prompt)
         self.assertIn("着眼点", user_prompt)
+        self.assertIn("何を書けばよいか", user_prompt)
 
 
 if __name__ == "__main__":
