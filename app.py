@@ -1814,6 +1814,12 @@ def feedback():
 
     return jsonify({"ok": True}), 200
 
+
+@app.post("/api/feedback")
+def feedback_alias():
+    """互換ルート。旧UIやテスト環境の /api/feedback 呼び出しを受け付ける。"""
+    return feedback()
+
 # =========================
 # ストック API
 # =========================
@@ -2312,6 +2318,15 @@ def generate_question():
 
     _update_metrics("generate", True, t0)
     return jsonify({"ok": True, "item": resp_item, "model": DEFAULT_MODEL}), 200
+
+
+@app.post("/api/next_question")
+@require_access_code
+@rate_limit
+@enforce_quota("generate")
+def next_question():
+    """互換ルート。旧UIの「次の問題」API呼び出しを生成APIへ寄せる。"""
+    return generate_question()
 
 # =========================
 # 採点 API
