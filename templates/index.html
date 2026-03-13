@@ -47,6 +47,7 @@
     </section>
 
     <section class="card" id="teacherDashboard" aria-labelledby="teacherDashboardTitle">
+      <div id="teacherAccessNotice" class="notice" style="display:none"></div>
       <div class="toolbar">
         <h2 id="teacherDashboardTitle">講師トップ（優先確認）</h2>
         <button class="btn" id="btnRefreshTeacherDashboard" type="button">更新</button>
@@ -67,6 +68,10 @@
           <div id="studentWeaknessList" class="list" style="max-height:240px"></div>
         </div>
       </div>
+      <div class="qcard" style="margin-top:10px">
+        <div class="small muted">生徒別答案履歴・比較（講師アクション）</div>
+        <div id="studentDrilldown" class="list" style="max-height:240px"></div>
+      </div>
     </section>
 
     <section class="card quickstart" id="quickStartCard" aria-labelledby="quickStartTitle">
@@ -80,7 +85,7 @@
         <li><strong>③ AI採点結果を見る</strong></li>
         <li><strong>④ コメントを見て書き直し・再提出</strong></li>
       </ol>
-      <div class="small muted">MVPでは固定ストック問題のみを使用します（問題自動生成UIは非表示）。</div>
+      <div class="small muted">MVPでは固定ストック問題のみを使用します。教科・単元を選び、ストック問題に回答する運用です（自動生成UIは非表示）。</div>
     </section>
 
     <!-- 設定 -->
@@ -122,9 +127,14 @@
           </div>
         </div>
 
-        <div class="flex mvp-hidden" style="gap:6px;margin-bottom:8px">
+        <div class="flex" style="gap:6px;margin-bottom:8px">
           <span class="tab active" data-subject="社会" tabindex="0">社会</span>
           <span class="tab" data-subject="理科" tabindex="0">理科</span>
+        </div>
+
+        <div class="stock-guide">
+          <div class="small muted">固定問題の選び方</div>
+          <div class="small">① 教科（社会/理科）を選ぶ → ② 単元や分類で絞る → ③ ストック一覧から問題を選択して採点へ進む</div>
         </div>
 
         <div class="grid-2">
@@ -1353,8 +1363,45 @@
       }catch(e){}
     }
 
+    async function openStudentDrilldown(userKey){
+      const wrap = $('#studentDrilldown');
+      if(!wrap) return;
+      if(!userKey){
+        wrap.innerHTML = '<div class="small muted">生徒を選ぶと、直近の答案履歴と比較を表示します。</div>';
+        return;
+      }
+      wrap.innerHTML = '<div class="small muted">読み込み中...</div>';
+      try{
+        const r = await apiGet(`/api/teacher/student/${encodeURIComponent(userKey)}`);
+        const items = Array.isArray(r?.items) ? r.items : [];
+        if(!items.length){
+          wrap.innerHTML = '<div class="small muted">この生徒の履歴はまだありません。</div>';
+          return;
+        }
+        wrap.innerHTML = '';
+        items.slice(0, 6).forEach(it=>{
+          const div = document.createElement('div');
+          div.className = 'item';
+          const improved = Number(it.latest_score ?? 0) - Number(it.first_score ?? 0);
+          div.innerHTML = `
+            <div><b>${escapeHtml((it.question || '').slice(0, 48))}</b></div>
+            <div class="small">比較: ${escapeHtml(String(it.first_score ?? 0))} → ${escapeHtml(String(it.latest_score ?? 0))} (${improved >= 0 ? '+' : ''}${improved}) / 提出${escapeHtml(String(it.attempt_count || 1))}回</div>
+            <div class="small muted">初回: ${escapeHtml(it.first_answer || '-')}</div>
+            <div class="small muted">最新: ${escapeHtml(it.latest_answer || '-')}</div>
+          `;
+          wrap.appendChild(div);
+        });
+      }catch(e){
+        wrap.innerHTML = '<div class="small muted">履歴の取得に失敗しました。</div>';
+      }
+    }
+
     function renderTeacherDashboard(data){
       const dash = data || {};
+      const notice = $('#teacherAccessNotice');
+      if(notice){
+        notice.style.display = 'none';
+      }
       $('#kpiSubmitted').textContent = String(dash.submitted_count ?? 0);
       $('#kpiNeedsReview').textContent = String(dash.needs_review_count ?? 0);
       $('#kpiResubmission').textContent = String(dash.resubmission_waiting_count ?? 0);
@@ -1374,6 +1421,8 @@
               <div><b>${escapeHtml(it.student_label || '匿名生徒')}</b> / ${escapeHtml((it.score ?? 0) + '点')}</div>
               <div class="small muted">${escapeHtml((it.question || '').slice(0,60))}</div>
               <div class="small">理由: ${escapeHtml((it.reasons || []).join(' / '))}</div>
+              <div class="small">提出回数: ${escapeHtml(String(it.attempt_count || 1))}</div>
+              <button class="btn small" data-drill-user="${escapeHtml(it.user_key || '')}">この生徒の履歴を見る</button>
             `;
             reviewList.appendChild(div);
           });
@@ -1390,22 +1439,42 @@
           students.forEach(s=>{
             const div = document.createElement('div');
             div.className = 'item';
+            const detail = Array.isArray(s.top_weakness_details)
+              ? s.top_weakness_details.map(x=>`${x.category}:${x.count}/${s.recent_answers || 0}`).join(' / ')
+              : '';
             div.innerHTML = `
               <div><b>${escapeHtml(s.student_label || s.user_key || '匿名')}</b></div>
               <div class="small">主要弱点: ${escapeHtml((s.top_weaknesses || []).join(' / ') || '-')}</div>
+              <div class="small muted">直近${escapeHtml(String(dash.weakness_window || 10))}件集計: ${escapeHtml(detail || '-')}</div>
+              <button class="btn small" data-drill-user="${escapeHtml(s.user_key || '')}">答案履歴と比較を表示</button>
             `;
             weakList.appendChild(div);
           });
         }
       }
+      openStudentDrilldown('');
+      document.querySelectorAll('[data-drill-user]').forEach(btn=>{
+        btn.onclick = ()=> openStudentDrilldown(btn.getAttribute('data-drill-user') || '');
+      });
     }
 
     async function refreshTeacherDashboard(){
+      const notice = $('#teacherAccessNotice');
       try{
         const r = await apiGet('/api/teacher/dashboard');
-        if(r?.ok) renderTeacherDashboard(r.dashboard || {});
+        if(r?.ok){
+          renderTeacherDashboard(r.dashboard || {});
+          return;
+        }
+        if(notice){
+          notice.style.display = '';
+          notice.textContent = '講師分析は未認証のため表示されていません。設定でACCESS_CODEを入力して更新してください。';
+        }
       }catch(e){
-        // ACCESS_CODE未設定時は静かにスキップ
+        if(notice){
+          notice.style.display = '';
+          notice.textContent = '講師トップを表示するにはACCESS_CODE認証が必要です（現在は未認証）。';
+        }
       }
     }
 
@@ -1437,9 +1506,13 @@
       const summary = $('#stockSummary');
       if(!summary) return;
       try{
-        const r = await apiGet('/api/stock/list?limit=1');
-        const total = r.total ?? r.count ?? 0;
-        summary.textContent = `ストック合計 ${total} 件`;
+        const r = await apiGet('/api/stock/list?limit=200');
+        const items = Array.isArray(r.items) ? r.items : [];
+        const total = r.total ?? r.count ?? items.length;
+        const social = items.filter(x=>x.subject === '社会').length;
+        const science = items.filter(x=>x.subject === '理科').length;
+        const units = new Set(items.map(x=>(x.unit || '').trim()).filter(Boolean));
+        summary.textContent = `ストック合計 ${total}件（社会:${social} / 理科:${science} / 単元:${units.size}）`;
       }catch(e){
         summary.textContent = 'ストックはモーダルで一覧・検索できます。';
       }

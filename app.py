@@ -195,6 +195,7 @@ def question_key(text: str) -> str:
 
 
 WEAKNESS_CATEGORIES = ["結論", "理由", "具体性", "因果関係", "用語の正確さ"]
+TEACHER_WEAKNESS_WINDOW = int(os.getenv("TEACHER_WEAKNESS_WINDOW", "10"))
 
 
 def infer_weakness_categories(rubric: Dict[str, int], weak_tags: List[str], answer_length: int) -> List[str]:
@@ -203,17 +204,40 @@ def infer_weakness_categories(rubric: Dict[str, int], weak_tags: List[str], answ
 
     if rubric.get("conclusion", 2) <= 1 or "結論" in tags_text:
         found.append("結論")
-    if rubric.get("logic", 2) <= 1 or "理由" in tags_text:
+    logic_low = rubric.get("logic", 2) <= 1
+    if logic_low or "理由" in tags_text or "なぜ" in tags_text:
         found.append("理由")
-    if answer_length < 25 or "具体" in tags_text:
+    has_example_hint = bool(re.search(r"例えば|たとえば|具体例|資料|データ|数値", tags_text))
+    if answer_length < 20 or "具体" in tags_text or (answer_length < 35 and not has_example_hint):
         found.append("具体性")
-    if rubric.get("logic", 2) <= 1 or "因果" in tags_text:
+    if (logic_low and ("因果" in tags_text or "原因" in tags_text or "結果" in tags_text)) or "因果" in tags_text:
         found.append("因果関係")
     if rubric.get("wording", 2) <= 1 or "用語" in tags_text or "語句" in tags_text:
         found.append("用語の正確さ")
 
     # 1件も当たらない場合の保険
-    return found[:3] or ["理由"]
+    if not found and answer_length < 30:
+        return ["具体性"]
+    return found[:3]
+
+
+def _normalize_log_categories(cats: Any) -> List[str]:
+    if not isinstance(cats, list):
+        return []
+    out: List[str] = []
+    for c in cats:
+        nc = normalize_text(c)
+        if nc in WEAKNESS_CATEGORIES and nc not in out:
+            out.append(nc)
+    return out
+
+
+def _load_grading_events(limit: int = 500) -> List[Dict[str, Any]]:
+    logs = [r for r in iter_jsonl(LOG_DIR / "grading.jsonl") if r.get("event") == "graded"]
+    logs.sort(key=lambda x: int(x.get("ts", 0) or 0))
+    if limit > 0:
+        return logs[-limit:]
+    return logs
 
 def is_similar(a: str, b: str, threshold: Optional[float] = None) -> bool:
     a, b = normalize_text(a), normalize_text(b)
@@ -1820,51 +1844,50 @@ def build_full_score_checks(criteria: List[str], answer: str, rubric: Dict[str, 
     return checks
 
 
-def analyze_teacher_dashboard(limit: int = 300) -> Dict[str, Any]:
-    logs = list(iter_jsonl(LOG_DIR / "grading.jsonl"))[-limit:]
-    submission_count = 0
+def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
+    logs = _load_grading_events(limit=limit)
+    submission_count = len(logs)
     resubmission_waiting = set()
     weak_students = set()
+    student_labels: Dict[str, str] = {}
     latest_by_student_question: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    student_weakness_counter: Dict[str, Dict[str, int]] = {}
+    student_recent: Dict[str, List[Dict[str, Any]]] = {}
     review_items: List[Dict[str, Any]] = []
 
     for rec in logs:
-        if rec.get("event") != "graded":
-            continue
-        submission_count += 1
         user_key = normalize_text(rec.get("user_key", "")) or "anonymous"
         student_label = normalize_text(rec.get("student_label", "")) or user_key
+        student_labels[user_key] = student_label
         qkey = normalize_text(rec.get("question_key", ""))
-        key = (user_key, qkey)
-        latest_by_student_question[key] = rec
+        latest_by_student_question[(user_key, qkey)] = rec
+        student_recent.setdefault(user_key, []).append(rec)
 
-        cats = rec.get("weakness_categories") or []
-        if isinstance(cats, list):
-            bucket = student_weakness_counter.setdefault(user_key, {})
-            for c in cats:
-                c = normalize_text(c)
-                if c in WEAKNESS_CATEGORIES:
-                    bucket[c] = bucket.get(c, 0) + 1
+    for (user_key, qkey), rec in latest_by_student_question.items():
+        history = [
+            h for h in student_recent.get(user_key, [])
+            if normalize_text(h.get("question_key", "")) == qkey
+        ]
+        history.sort(key=lambda x: int(x.get("ts", 0) or 0))
 
-    for (_, _), rec in latest_by_student_question.items():
-        user_key = normalize_text(rec.get("user_key", "")) or "anonymous"
-        student_label = normalize_text(rec.get("student_label", "")) or user_key
         score = int(rec.get("score", 0) or 0)
         max_points = int(rec.get("max_points", 10) or 10)
-        rewrite_count = int(rec.get("rewrite_count", 0) or 0)
         answer_length = int(rec.get("answer_length", 0) or 0)
-        weak_cats = rec.get("weakness_categories") or []
-        low_chain = rec.get("low_performance_streak", {}) if isinstance(rec.get("low_performance_streak"), dict) else {}
         ai_flag = bool(rec.get("ai_review_flag", False))
-
         low_score_threshold = 6 if max_points == 10 else int(max_points * 0.6)
+        low_attempts = [h for h in history if int(h.get("score", 0) or 0) < low_score_threshold]
+
+        recent_cats = _normalize_log_categories(rec.get("weakness_categories", []))
+        consecutive_same_weakness = []
+        if len(history) >= 2:
+            prev = _normalize_log_categories(history[-2].get("weakness_categories", []))
+            consecutive_same_weakness = [c for c in recent_cats if c in prev]
+
         reasons: List[str] = []
-        if rewrite_count >= 2 and score < low_score_threshold:
-            reasons.append("2回以上の再提出でも基準点未満")
-            resubmission_waiting.add(student_label)
-        if any(int(v or 0) >= 2 for v in low_chain.values()):
-            reasons.append("特定観点の低評価が連続")
+        if len(history) >= 3 and len(low_attempts) >= 3 and all(int(h.get("score", 0) or 0) < low_score_threshold for h in history[-3:]):
+            reasons.append("2回以上再提出しても基準未満")
+            resubmission_waiting.add(student_labels.get(user_key, user_key))
+        if consecutive_same_weakness:
+            reasons.append(f"同じ弱点が連続: {' / '.join(consecutive_same_weakness[:2])}")
         if answer_length < 20:
             reasons.append("解答が短すぎる")
         if ai_flag:
@@ -1873,39 +1896,46 @@ def analyze_teacher_dashboard(limit: int = 300) -> Dict[str, Any]:
         if reasons:
             review_items.append({
                 "request_id": rec.get("request_id", ""),
-                "student_label": student_label,
+                "student_label": student_labels.get(user_key, user_key),
                 "user_key": user_key,
                 "question": rec.get("question_preview", "（問題テキスト非表示）"),
-                "question_key": rec.get("question_key", ""),
+                "question_key": qkey,
                 "score": score,
                 "max_points": max_points,
-                "rewrite_count": rewrite_count,
-                "weakness_categories": weak_cats,
+                "rewrite_count": max(len(history) - 1, 0),
+                "attempt_count": len(history),
+                "weakness_categories": recent_cats,
                 "reasons": reasons,
                 "ts": int(rec.get("ts", 0) or 0),
             })
 
     students: List[Dict[str, Any]] = []
-    for user_key, weak_map in student_weakness_counter.items():
-        if not weak_map:
+    for user_key, rows in student_recent.items():
+        if not rows:
             continue
-        sorted_weak = sorted(weak_map.items(), key=lambda x: x[1], reverse=True)
+        recent_rows = sorted(rows, key=lambda x: int(x.get("ts", 0) or 0), reverse=True)[:TEACHER_WEAKNESS_WINDOW]
+        weakness_counter: Dict[str, int] = {}
+        for row in recent_rows:
+            for c in _normalize_log_categories(row.get("weakness_categories", [])):
+                weakness_counter[c] = weakness_counter.get(c, 0) + 1
+
+        if not weakness_counter:
+            continue
+        total = sum(weakness_counter.values())
+        sorted_weak = sorted(weakness_counter.items(), key=lambda x: x[1], reverse=True)
         top = [name for name, _ in sorted_weak[:2]]
-        total = sum(weak_map.values())
-        student_name = user_key
-        for rec in reversed(logs):
-            if normalize_text(rec.get("user_key", "")) == user_key:
-                student_name = normalize_text(rec.get("student_label", "")) or user_key
-                break
+        top_ratio = [{"category": n, "count": cnt, "rate": round(cnt / len(recent_rows), 2)} for n, cnt in sorted_weak[:3]]
         students.append({
-            "student_label": student_name,
+            "student_label": student_labels.get(user_key, user_key),
             "user_key": user_key,
             "top_weaknesses": top,
-            "weakness_counts": weak_map,
+            "top_weakness_details": top_ratio,
+            "weakness_counts": weakness_counter,
             "weakness_total": total,
+            "recent_answers": len(recent_rows),
         })
         if total >= 3:
-            weak_students.add(student_name)
+            weak_students.add(student_labels.get(user_key, user_key))
 
     review_items.sort(key=lambda x: x.get("ts", 0), reverse=True)
     students.sort(key=lambda x: x.get("weakness_total", 0), reverse=True)
@@ -1917,6 +1947,7 @@ def analyze_teacher_dashboard(limit: int = 300) -> Dict[str, Any]:
         "weak_student_count": len(weak_students),
         "needs_review_items": review_items[:20],
         "students": students[:30],
+        "weakness_window": TEACHER_WEAKNESS_WINDOW,
     }
 
 # =========================
@@ -1928,9 +1959,57 @@ def root():
 
 
 @app.get("/api/teacher/dashboard")
-@require_access_code
 def api_teacher_dashboard():
+    if ACCESS_CODE and not _is_teacher_request():
+        return jsonify({
+            "ok": False,
+            "error": "teacher_access_required",
+            "message": "講師トップの表示にはACCESS_CODE認証が必要です。設定からACCESS_CODEを入力してください。",
+        }), 403
     return jsonify({"ok": True, "dashboard": analyze_teacher_dashboard()}), 200
+
+
+@app.get("/api/teacher/student/<user_key>")
+def api_teacher_student(user_key: str):
+    if ACCESS_CODE and not _is_teacher_request():
+        return jsonify({"ok": False, "error": "teacher_access_required"}), 403
+
+    target = normalize_text(user_key)
+    logs = [
+        rec for rec in _load_grading_events(limit=700)
+        if normalize_text(rec.get("user_key", "")) == target
+    ]
+    logs.sort(key=lambda x: int(x.get("ts", 0) or 0), reverse=True)
+    if not logs:
+        return jsonify({"ok": True, "student": None, "items": []}), 200
+
+    label = normalize_text(logs[0].get("student_label", "")) or target
+    items: List[Dict[str, Any]] = []
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in logs:
+        qkey = normalize_text(rec.get("question_key", "")) or ""
+        grouped.setdefault(qkey, []).append(rec)
+
+    for qkey, rows in grouped.items():
+        rows.sort(key=lambda x: int(x.get("ts", 0) or 0))
+        latest = rows[-1]
+        first = rows[0]
+        items.append({
+            "question_key": qkey,
+            "question": latest.get("question_preview", "（問題テキスト非表示）"),
+            "attempt_count": len(rows),
+            "latest_score": int(latest.get("score", 0) or 0),
+            "max_points": int(latest.get("max_points", 10) or 10),
+            "latest_request_id": latest.get("request_id", ""),
+            "first_answer": normalize_text(first.get("student_answer", ""))[:160],
+            "latest_answer": normalize_text(latest.get("student_answer", ""))[:160],
+            "first_score": int(first.get("score", 0) or 0),
+            "weakness_categories": _normalize_log_categories(latest.get("weakness_categories", [])),
+            "ts": int(latest.get("ts", 0) or 0),
+        })
+
+    items.sort(key=lambda x: x.get("ts", 0), reverse=True)
+    return jsonify({"ok": True, "student": {"user_key": target, "student_label": label}, "items": items[:20]}), 200
 
 # =========================
 # エラーハンドラ
@@ -3027,18 +3106,50 @@ def grade_answer():
 
     user_label = normalize_text(request.headers.get("X-User-Label", ""))[:40]
     weakness_categories = infer_weakness_categories(rubric, weak_tags, answer_length)
-    low_streak = {
-        "conclusion": 2 if rubric.get("conclusion", 0) <= 1 else 0,
-        "logic": 2 if rubric.get("logic", 0) <= 1 else 0,
-        "wording": 2 if rubric.get("wording", 0) <= 1 else 0,
-    }
-    ai_review_flag = bool(answer_length < 20 or score_total_scaled <= max(2, int(max_score * 0.4)))
+    user_key = _get_user_key()
+    qkey = question_key(data["question"])
+    recent_same_question = [
+        rec for rec in _load_grading_events(limit=500)
+        if normalize_text(rec.get("user_key", "")) == user_key and normalize_text(rec.get("question_key", "")) == qkey
+    ]
+    recent_same_question.sort(key=lambda x: int(x.get("ts", 0) or 0))
+
+    low_streak = {"conclusion": 0, "logic": 0, "wording": 0}
+    for key, rubric_key in (("conclusion", "conclusion"), ("logic", "logic"), ("wording", "wording")):
+        streak = 1 if int(rubric.get(rubric_key, 0) or 0) <= 1 else 0
+        for prev in reversed(recent_same_question):
+            prev_map = prev.get("low_performance_streak", {}) if isinstance(prev.get("low_performance_streak"), dict) else {}
+            prev_streak = int(prev_map.get(key, 0) or 0)
+            if prev_streak > 0 and streak > 0:
+                streak = prev_streak + 1
+                break
+            break
+        low_streak[key] = streak
+
+    same_cat_streak = 1
+    if weakness_categories and recent_same_question:
+        prev_cats = _normalize_log_categories(recent_same_question[-1].get("weakness_categories", []))
+        if any(c in prev_cats for c in weakness_categories):
+            same_cat_streak = int(recent_same_question[-1].get("same_weakness_streak", 1) or 1) + 1
+
+    low_score_threshold = 6 if max_score == 10 else int(max_score * 0.6)
+    consecutive_low_scores = 1 if score_total_scaled < low_score_threshold else 0
+    if consecutive_low_scores and recent_same_question:
+        prev_low = int(recent_same_question[-1].get("consecutive_low_scores", 0) or 0)
+        consecutive_low_scores = prev_low + 1 if prev_low > 0 else 1
+
+    ai_review_flag = bool(
+        answer_length < 20
+        or score_total_scaled <= max(2, int(max_score * 0.4))
+        or consecutive_low_scores >= 3
+        or same_cat_streak >= 2
+    )
 
     graded_log = {
         "event": "graded",
         "request_id": request_id,
         "teacher_request": teacher_request,
-        "user_key": _get_user_key(),
+        "user_key": user_key,
         "student_label": user_label,
         "user_id_masked": user_id_masked,
         "subject": stock_subject,
@@ -3053,10 +3164,12 @@ def grade_answer():
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "answer_length": answer_length,
-        "question_key": question_key(data["question"]),
+        "question_key": qkey,
         "question_preview": normalize_text(data["question"])[:120],
         "weakness_categories": weakness_categories,
         "low_performance_streak": low_streak,
+        "same_weakness_streak": same_cat_streak,
+        "consecutive_low_scores": consecutive_low_scores,
         "ai_review_flag": ai_review_flag,
         "is_rewrite": is_rewrite,
         "model": DEFAULT_MODEL,
