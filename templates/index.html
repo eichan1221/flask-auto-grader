@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>AI記述トレーナー</title>
+  <title>塾向けAI記述支援サービス（MVP）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- ✅ 外部CSSを読み込み（キャッシュ対策で ?v= を付与） -->
@@ -12,7 +12,7 @@
   <header>
     <div class="wrap toolbar" id="topToolbar">
       <div class="flex" style="gap:10px">
-        <h1>AI記述トレーナー</h1>
+        <h1>塾向けAI記述支援サービス</h1>
         <span id="modelTag" class="tag" aria-hidden="true">model: ...</span>
       </div>
       <button class="btn small ghost mobile-toolbar-toggle" id="btnToggleTopActions" type="button" aria-expanded="false">メニュー</button>
@@ -41,23 +41,46 @@
     <div id="errorBanner" class="error-banner" style="display:none" role="alert" aria-live="assertive"></div>
 
     <section class="purpose-card" aria-labelledby="purposeLeadTitle">
-      <h2 id="purposeLeadTitle">この記述トレーナーの目的</h2>
-      <p>この記述トレーナーは、社会や理科で出てくる用語や出来事の流れを、<strong>「説明できるレベル」まで理解すること</strong>を目的とした学習アプリです。<br>
-      単語を覚えるだけで終わらず、意味・背景・つながりまで理解することで、得点力だけでなく、読解力や本質的な理解を育てます。</p>
+      <h2 id="purposeLeadTitle">講師の添削業務を支援するMVP</h2>
+      <p>このサービスは、<strong>小規模塾向けのAI記述支援サービス</strong>です。目的は「添削時間の削減」「添削品質のばらつき抑制」「次の改善行動の明確化」「生徒ごとの弱点傾向把握」です。<br>
+      主役は講師トップ画面で、要確認答案と弱点傾向を優先表示します。</p>
+    </section>
+
+    <section class="card" id="teacherDashboard" aria-labelledby="teacherDashboardTitle">
+      <div class="toolbar">
+        <h2 id="teacherDashboardTitle">講師トップ（優先確認）</h2>
+        <button class="btn" id="btnRefreshTeacherDashboard" type="button">更新</button>
+      </div>
+      <div class="teacher-kpi-grid">
+        <div class="kpi-card"><div class="small muted">提出済み答案数</div><div id="kpiSubmitted" class="kpi-value">-</div></div>
+        <div class="kpi-card"><div class="small muted">要確認答案数</div><div id="kpiNeedsReview" class="kpi-value danger">-</div></div>
+        <div class="kpi-card"><div class="small muted">再提出待ち人数</div><div id="kpiResubmission" class="kpi-value">-</div></div>
+        <div class="kpi-card"><div class="small muted">弱点が目立つ生徒数</div><div id="kpiWeakStudents" class="kpi-value">-</div></div>
+      </div>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="qcard">
+          <div class="small muted">要確認答案一覧</div>
+          <div id="needsReviewList" class="list" style="max-height:240px"></div>
+        </div>
+        <div class="qcard">
+          <div class="small muted">生徒ごとの弱点傾向（5分類）</div>
+          <div id="studentWeaknessList" class="list" style="max-height:240px"></div>
+        </div>
+      </div>
     </section>
 
     <section class="card quickstart" id="quickStartCard" aria-labelledby="quickStartTitle">
       <div class="toolbar">
-        <h2 id="quickStartTitle">はじめての人向け：まずはこの4ステップ</h2>
+        <h2 id="quickStartTitle">生徒画面（最小導線）</h2>
         <button class="btn small" id="btnHideQuickStart" type="button">閉じる</button>
       </div>
       <ol class="quickstart-steps">
         <li><strong>① 問題を読む</strong>（上の「問題文」に表示されます）</li>
         <li><strong>② 解答を書く</strong>（すぐ下の解答欄に入力）</li>
-        <li><strong>③ 採点する</strong>（「採点する」ボタン）</li>
-        <li><strong>④ コメントを見て書き直す</strong>（「書き直して再採点する」）</li>
+        <li><strong>③ AI採点結果を見る</strong></li>
+        <li><strong>④ コメントを見て書き直し・再提出</strong></li>
       </ol>
-      <div class="small muted">迷ったら「模範解答」「解説・出題意図」タブを開いてください。</div>
+      <div class="small muted">MVPでは固定ストック問題のみを使用します（問題自動生成UIは非表示）。</div>
     </section>
 
     <!-- 設定 -->
@@ -89,17 +112,17 @@
     </div>
 
     <div class="row" style="margin-top:12px">
-      <!-- 左：生成 & ストック -->
-      <section class="card">
+      <!-- 左：固定ストック運用 -->
+      <section class="card" id="stockOpsSection">
         <div class="toolbar">
-          <h2>① 出題の生成 & ストック</h2>
+          <h2>① 固定ストック問題の運用</h2>
           <div class="flex">
             <button class="btn" id="btnExportJson">📦 stocks.json</button>
             <button class="btn" id="btnExportCsv">📊 stocks.csv</button>
           </div>
         </div>
 
-        <div class="flex" style="gap:6px;margin-bottom:8px">
+        <div class="flex mvp-hidden" style="gap:6px;margin-bottom:8px">
           <span class="tab active" data-subject="社会" tabindex="0">社会</span>
           <span class="tab" data-subject="理科" tabindex="0">理科</span>
         </div>
@@ -133,7 +156,7 @@
           </div>
         </div>
 
-        <details class="advanced" id="advancedSettings">
+        <details class="advanced mvp-hidden" id="advancedSettings">
           <summary>詳細設定（Advanced）</summary>
           <div class="grid-2" style="margin-top:10px">
             <div>
@@ -170,11 +193,11 @@
           </div>
         </details>
 
-        <div class="flex" style="margin-top:8px">
+        <div class="flex mvp-hidden" style="margin-top:8px">
           <button class="btn brand" id="btnGenerate">問題を自動生成</button>
         </div>
 
-        <div id="genResult" style="margin-top:12px;display:none">
+        <div id="genResult" class="mvp-hidden" style="margin-top:12px;display:none">
           <h3>生成結果</h3>
           <div class="qcard">
             <div class="small muted" id="genMeta"></div>
@@ -317,7 +340,7 @@
         </div>
 
         <div class="qcard mini" id="historyCard" style="margin-top:12px">
-          <div class="small muted">直近10回の学習ログ</div>
+          <div class="small muted">直近10回の提出履歴</div>
           <div class="small muted">※この履歴はこの端末のブラウザに保存されます。閉じても残ります。</div>
           <div class="history-controls">
             <div style="flex:1;min-width:180px">
@@ -332,6 +355,13 @@
             <div>伸び幅（最新-初回）: <span id="growthScore">-</span></div>
             <div>つまずきやすい観点: <span id="weakSummary">-</span></div>
           </div>
+        </div>
+
+        <div class="qcard" id="answerComparisonCard" style="margin-top:12px;display:none">
+          <div class="toolbar">
+            <div class="small muted">答案比較（初回MVP）</div>
+          </div>
+          <div id="comparisonBody" class="small"></div>
         </div>
 
         <div id="gradeResult" style="margin-top:12px;display:none">
@@ -1239,6 +1269,7 @@
     let aiTeacherMessages = [];
     let gradingInFlight = false;
     let generatingInFlight = false;
+    let firstSubmittedAnswer = '';
 
     // ---- 設定UI ----
     function loadSettings(){
@@ -1320,6 +1351,86 @@
         mainBadge.classList.toggle('limit-reached', mainRem <= 0);
         aiBadge.classList.toggle('limit-reached', aiRem <= 0);
       }catch(e){}
+    }
+
+    function renderTeacherDashboard(data){
+      const dash = data || {};
+      $('#kpiSubmitted').textContent = String(dash.submitted_count ?? 0);
+      $('#kpiNeedsReview').textContent = String(dash.needs_review_count ?? 0);
+      $('#kpiResubmission').textContent = String(dash.resubmission_waiting_count ?? 0);
+      $('#kpiWeakStudents').textContent = String(dash.weak_student_count ?? 0);
+
+      const reviewList = $('#needsReviewList');
+      if(reviewList){
+        reviewList.innerHTML = '';
+        const items = Array.isArray(dash.needs_review_items) ? dash.needs_review_items : [];
+        if(!items.length){
+          reviewList.innerHTML = '<div class="small muted">現在、要確認答案はありません。</div>';
+        }else{
+          items.forEach(it=>{
+            const div = document.createElement('div');
+            div.className = 'item';
+            div.innerHTML = `
+              <div><b>${escapeHtml(it.student_label || '匿名生徒')}</b> / ${escapeHtml((it.score ?? 0) + '点')}</div>
+              <div class="small muted">${escapeHtml((it.question || '').slice(0,60))}</div>
+              <div class="small">理由: ${escapeHtml((it.reasons || []).join(' / '))}</div>
+            `;
+            reviewList.appendChild(div);
+          });
+        }
+      }
+
+      const weakList = $('#studentWeaknessList');
+      if(weakList){
+        weakList.innerHTML = '';
+        const students = Array.isArray(dash.students) ? dash.students : [];
+        if(!students.length){
+          weakList.innerHTML = '<div class="small muted">弱点傾向データはまだありません。</div>';
+        }else{
+          students.forEach(s=>{
+            const div = document.createElement('div');
+            div.className = 'item';
+            div.innerHTML = `
+              <div><b>${escapeHtml(s.student_label || s.user_key || '匿名')}</b></div>
+              <div class="small">主要弱点: ${escapeHtml((s.top_weaknesses || []).join(' / ') || '-')}</div>
+            `;
+            weakList.appendChild(div);
+          });
+        }
+      }
+    }
+
+    async function refreshTeacherDashboard(){
+      try{
+        const r = await apiGet('/api/teacher/dashboard');
+        if(r?.ok) renderTeacherDashboard(r.dashboard || {});
+      }catch(e){
+        // ACCESS_CODE未設定時は静かにスキップ
+      }
+    }
+
+    function renderComparisonPanel(result, latestAnswer){
+      const card = $('#answerComparisonCard');
+      const body = $('#comparisonBody');
+      if(!card || !body) return;
+      if(!firstSubmittedAnswer || !latestAnswer || firstSubmittedAnswer === latestAnswer){
+        card.style.display = 'none';
+        body.innerHTML = '';
+        return;
+      }
+      const prev = Number(result?.previous_score_total ?? result?.score_total ?? 0);
+      const cur = Number(result?.score_total ?? 0);
+      const diff = cur - prev;
+      const weak = Array.isArray(result?.weakness_categories) ? result.weakness_categories : [];
+      card.style.display = '';
+      body.innerHTML = `
+        <div><b>問題文:</b> ${escapeHtml(currentItem?.question || '')}</div>
+        <div style="margin-top:6px"><b>初回答案:</b> ${escapeHtml(firstSubmittedAnswer)}</div>
+        <div style="margin-top:6px"><b>再提出答案:</b> ${escapeHtml(latestAnswer)}</div>
+        <div style="margin-top:6px"><b>点数変化:</b> ${prev} → ${cur} (${diff >= 0 ? '+' : ''}${diff})</div>
+        <div style="margin-top:6px"><b>AIコメント:</b> ${escapeHtml(result?.short_comment || result?.next_step || '')}</div>
+        <div style="margin-top:6px"><b>弱点観点:</b> ${escapeHtml(weak.join(' / ') || '-')}</div>
+      `;
     }
 
     async function refreshStockSummary(){
@@ -1602,6 +1713,7 @@
       $('#settingsCard').style.display = 'none';
       refreshUsage();
       refreshStockSummary();
+      refreshTeacherDashboard();
 
       const quickStartDismissed = localStorage.getItem("quickstart_dismissed_v1");
       if(quickStartDismissed){
@@ -1667,8 +1779,10 @@
         let item = res.item || res.generated || {};
         if(res.item && res.item.question){
           currentItem = res.item;
+          firstSubmittedAnswer = '';
         }else{
           currentItem = item;
+          firstSubmittedAnswer = '';
         }
         renderGenerated(item, res.duplicate_of);
         refreshStockSummary();
@@ -1845,6 +1959,7 @@
 
     function useStock(it){
       currentItem = it;
+      firstSubmittedAnswer = '';
       if(it.subject && it.subject !== subject){
         subject = it.subject;
         updateSubjectTabs();
@@ -2315,6 +2430,9 @@
         last10_scores: scoreHistory.map(s=>s.score),
         stock_id: currentItem.id || ""
       };
+      if(!firstSubmittedAnswer){
+        firstSubmittedAnswer = body.student_answer;
+      }
       if($('#includeModelForGrading').checked && currentItem.model_answer){
         body.model_answer = currentItem.model_answer;
       }
@@ -2477,8 +2595,10 @@
         }
 
         addHistoryEntry(r.score_total ?? r.score ?? 0, r.max_score ?? difficultyToMaxPoints(body.difficulty), r.rubric);
+        renderComparisonPanel(r, body.student_answer);
         updateAssistStatus();
         await refreshUsage();
+        await refreshTeacherDashboard();
         hideErrorBanner();
         lastRecoverAction = null;
         toast('採点しました');
@@ -2623,6 +2743,7 @@
     $('#btnHideSettings').onclick = ()=> $('#settingsCard').style.display='none';
     $('#btnSaveSettings').onclick = ()=> { saveSettings(); boot(); };
     $('#btnReload').onclick = boot;
+    $('#btnRefreshTeacherDashboard')?.addEventListener('click', refreshTeacherDashboard);
 
     $('#btnHowto')?.addEventListener('click', openHowto);
     $('#btnHideQuickStart')?.addEventListener('click', ()=>{
