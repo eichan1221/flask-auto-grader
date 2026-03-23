@@ -12,7 +12,7 @@
 # - 互換: X-Access-Code / ?access_code / ?code / Cookie(access_code) を許可
 # - 追加: /api/stock/clear /api/stock/import /logs.zip /status に OpenAI 疎通
 # - 新規: /api/stock/search /api/stock/random /api/model(POST) / NOVELTY_THRESHOLD / MAX_TOKENS_*
-# - 日次クォータ（本編20回 / AI先生5回, /api/usage）
+# - 日次クォータ（本編20回 / AI先生5回, /api/usage）※講師/テスター向けにUI非表示・設定でバイパス可
 # - 注意: UI 側の fetch は /api/* を呼び出す想定（HTMLは変更不要）
 
 import os
@@ -118,6 +118,9 @@ _rate_bucket: Dict[str, List[float]] = {}
 # 無課金向け日次制限（サーバー時刻/JST基準）
 FREE_DAILY_MAIN_LIMIT = int(os.getenv("FREE_DAILY_MAIN_LIMIT", "20"))
 FREE_DAILY_AI_LIMIT = int(os.getenv("FREE_DAILY_AI_LIMIT", "5"))
+ENABLE_DAILY_LIMIT = env_bool("ENABLE_DAILY_LIMIT", True)
+DAILY_LIMIT_BYPASS_FOR_TEACHER = env_bool("DAILY_LIMIT_BYPASS_FOR_TEACHER", True)
+DEFAULT_APP_MODE = (os.getenv("DEFAULT_APP_MODE", "teacher") or "teacher").strip().lower()
 
 # 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
@@ -1075,6 +1078,30 @@ def _usage_limits() -> Dict[str, int]:
         "ai": max(0, FREE_DAILY_AI_LIMIT),
     }
 
+
+
+def _request_app_mode() -> str:
+    mode = (
+        request.headers.get("X-App-Mode")
+        or request.args.get("mode")
+        or DEFAULT_APP_MODE
+        or "teacher"
+    )
+    return normalize_text(mode).lower()
+
+
+def _daily_limit_bypass_active() -> bool:
+    if not ENABLE_DAILY_LIMIT:
+        return True
+    mode = _request_app_mode()
+    if DAILY_LIMIT_BYPASS_FOR_TEACHER and mode in {"teacher", "tester"}:
+        return True
+    if env_bool("TEACHER_MODE", False) and mode == "teacher":
+        return True
+    if env_bool("TESTER_MODE", False) and mode == "tester":
+        return True
+    return False
+
 def _next_reset_iso() -> str:
     # 次の0時（JST）のISO文字列
     jst = timezone(timedelta(hours=9))
@@ -1097,6 +1124,9 @@ def enforce_quota(kind: str):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            if _daily_limit_bypass_active():
+                return make_response(fn(*args, **kwargs))
+
             user_key = _get_user_key()
             usage = _load_usage_for_today()
             u = usage.get(user_key) or _empty_usage()
@@ -2133,6 +2163,9 @@ def api_usage():
     }
     return jsonify({
         "ok": True,
+        "enabled": ENABLE_DAILY_LIMIT,
+        "bypassed": _daily_limit_bypass_active(),
+        "mode": _request_app_mode(),
         "limits": limits,
         "usage": {
             "total": int(u.get("total", 0)),
