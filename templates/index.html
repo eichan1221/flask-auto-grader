@@ -17,20 +17,8 @@
       </div>
       <button class="btn small ghost mobile-toolbar-toggle" id="btnToggleTopActions" type="button" aria-expanded="false">メニュー</button>
       <div class="flex top-actions" id="topActions" style="gap:8px;align-items:center">
-        <div id="usageBadge" class="usage-badges" aria-live="polite">
-          <span id="mainUsageBadge" class="pill small usage-pill">本編：あと --回</span>
-          <span id="aiUsageBadge" class="pill small usage-pill">AI先生：あと --回</span>
-        </div>
-
-        <!-- ✅ ここが「表示欄」：必ず見える場所に配置 -->
-        <button class="btn brand" id="btnHowto" title="使い方説明を開く">使い方説明</button>
-        <button class="btn" id="btnPurpose" title="このアプリの目的を開く">このアプリの目的</button>
-        <button class="btn" id="btnStudyTips" title="勉強法のコツを開く">
-          <span class="study-tips-icon" aria-hidden="true">✨</span>
-          <span>これをすれば成績が上がる勉強法！</span>
-          <span class="study-tips-badge" aria-hidden="true">NEW</span>
-        </button>
-
+        <span class="toolbar-note">講師向けダッシュボードを優先表示中</span>
+        <button class="btn small ghost icon-btn" id="btnHowto" title="ヘルプを開く" aria-label="ヘルプを開く">?</button>
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
       </div>
@@ -40,10 +28,16 @@
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
     <div id="errorBanner" class="error-banner" style="display:none" role="alert" aria-live="assertive"></div>
 
-    <section class="purpose-card" aria-labelledby="purposeLeadTitle">
-      <h2 id="purposeLeadTitle">講師の添削業務を支援するMVP</h2>
-      <p>このサービスは、<strong>小規模塾向けのAI記述支援サービス</strong>です。目的は「添削時間の削減」「添削品質のばらつき抑制」「次の改善行動の明確化」「生徒ごとの弱点傾向把握」です。<br>
-      主役は講師トップ画面で、要確認答案と弱点傾向を優先表示します。</p>
+    <section class="coach-hero" aria-labelledby="coachHeroTitle">
+      <div>
+        <div class="caps">講師向け支援</div>
+        <h2 id="coachHeroTitle">最初に見るべき答案と生徒状況をひと目で確認</h2>
+        <p>提出状況・要確認答案・再提出待ち・弱点傾向を先に把握し、そのまま答案比較や個別フォローに進める構成に整理しました。</p>
+      </div>
+      <div class="coach-hero-actions">
+        <button class="btn brand" id="btnJumpNeedsReview" type="button">要確認答案を見る</button>
+        <button class="btn" id="btnJumpWeakness" type="button">弱点傾向を見る</button>
+      </div>
     </section>
 
     <section class="card" id="teacherDashboard" aria-labelledby="teacherDashboardTitle">
@@ -74,19 +68,24 @@
       </div>
     </section>
 
-    <section class="card quickstart" id="quickStartCard" aria-labelledby="quickStartTitle">
-      <div class="toolbar">
-        <h2 id="quickStartTitle">生徒画面（最小導線）</h2>
-        <button class="btn small" id="btnHideQuickStart" type="button">閉じる</button>
+    <details class="card quickstart-collapsible" id="quickStartCard">
+      <summary>
+        <span>
+          <span class="caps">補足</span>
+          <strong id="quickStartTitle">操作メモ</strong>
+        </span>
+        <span class="small muted">必要なときだけ開く</span>
+      </summary>
+      <div class="quickstart-body">
+        <ol class="quickstart-steps">
+          <li><strong>固定ストック問題を選ぶ</strong></li>
+          <li><strong>答案を入力して採点する</strong></li>
+          <li><strong>講評を確認して再提出対象を判断する</strong></li>
+          <li><strong>必要に応じて答案比較・弱点傾向へ進む</strong></li>
+        </ol>
+        <div class="small muted">講師向けMVPでは固定ストック問題を前提にし、講師ダッシュボードの確認を最優先にしています。</div>
       </div>
-      <ol class="quickstart-steps">
-        <li><strong>① 問題を読む</strong>（上の「問題文」に表示されます）</li>
-        <li><strong>② 解答を書く</strong>（すぐ下の解答欄に入力）</li>
-        <li><strong>③ AI採点結果を見る</strong></li>
-        <li><strong>④ コメントを見て書き直し・再提出</strong></li>
-      </ol>
-      <div class="small muted">MVPでは固定ストック問題のみを使用します。教科・単元を選び、ストック問題に回答する運用です（自動生成UIは非表示）。</div>
-    </section>
+    </details>
 
     <!-- 設定 -->
     <div class="card" id="settingsCard" style="display:none">
@@ -354,8 +353,8 @@
           <div class="small muted">※この履歴はこの端末のブラウザに保存されます。閉じても残ります。</div>
           <div class="history-controls">
             <div style="flex:1;min-width:180px">
-              <label for="nicknameInput">学習者ニックネーム（任意）</label>
-              <input type="text" id="nicknameInput" placeholder="例: tester01" maxlength="24">
+              <label for="nicknameInput">生徒表示名 / テスター名（任意）</label>
+              <input type="text" id="nicknameInput" placeholder="例: classA-01 / tester01" maxlength="24">
             </div>
             <button class="btn" id="btnResetHistory" type="button">学習ログをリセット</button>
           </div>
@@ -537,8 +536,8 @@
     <div class="panel" role="dialog" aria-modal="true" aria-labelledby="howtoTitle">
       <div class="panelHeader">
         <div>
-          <h2 class="panelTitle" id="howtoTitle">使い方説明（はじめての方向け）</h2>
-          <div class="small muted">迷ったらこの画面を開いて、上から順番に進めてください。</div>
+          <h2 class="panelTitle" id="howtoTitle">ヘルプ</h2>
+          <div class="small muted">講師向けMVPの主要操作だけを簡潔にまとめています。</div>
         </div>
         <div class="flex" style="gap:8px">
           <button class="btn" id="btnHowtoClose" aria-label="使い方説明を閉じる">閉じる</button>
@@ -547,30 +546,30 @@
 
       <div class="panelBody">
         <div class="callout">
-          <div style="font-weight:700;margin-bottom:6px">このUIでできること</div>
+          <div style="font-weight:700;margin-bottom:6px">講師向けMVPでできること</div>
           <ul style="margin:0;padding-left:18px;line-height:1.8">
-            <li><b>出題（記述問題）の自動生成</b>：社会/理科の記述問題を、入試・定期テスト想定で作れます。</li>
-            <li><b>採点（10点/100点）</b>：生徒の解答を入力すると、点数と講評・理由・模範解答（採点後のみ）を返します。</li>
-            <li><b>ストック保存</b>：生成した問題を最大10件まで保存し、あとで呼び出して使えます。</li>
-            <li><b>エクスポート</b>：stocks / grading のデータを書き出し、バックアップや共有に使えます。</li>
+            <li><b>要確認答案の把握</b>：講師トップで優先確認すべき答案を見つけられます。</li>
+            <li><b>弱点傾向の確認</b>：生徒ごとのつまずき傾向を直近提出から把握できます。</li>
+            <li><b>答案比較</b>：同一生徒の初回答案と最新答案を比較できます。</li>
+            <li><b>採点・再提出支援</b>：答案ごとの講評を見ながら再提出判断に進めます。</li>
           </ul>
         </div>
 
         <div class="divider" style="margin:14px 0"></div>
 
         <div>
-          <div class="caps">まず最初に（初回だけ）</div>
+          <div class="caps">最初に確認すること</div>
           <ol style="margin-top:8px;line-height:1.8">
-            <li>右上の<strong>設定</strong>を開き、必要なら「API Base URL」と「ACCESS_CODE」を入力します。</li>
-            <li>保存後、右上の<strong>再読込</strong>で反映します（同一オリジンなら空欄のままでOK）。</li>
-            <li>使い方が分からなくなったら、この<strong>使い方説明</strong>を開けばOKです。</li>
+            <li>トップの<strong>講師トップ</strong>で要確認答案数と再提出待ち人数を確認します。</li>
+            <li>必要なら<strong>設定</strong>で接続情報を見直し、<strong>再読込</strong>で反映します。</li>
+            <li>運用手順を忘れたら、この<strong>ヘルプ</strong>を開いてください。</li>
           </ol>
         </div>
 
         <div class="divider" style="margin:14px 0"></div>
 
         <div>
-          <div class="caps">① 出題の生成（左側）</div>
+          <div class="caps">① 問題準備（左側）</div>
           <ol style="margin-top:8px;line-height:1.8">
             <li><strong>社会/理科</strong>タブを選びます（理科は学年を指定可能）。</li>
             <li>分類・単元・難易度・解答分量の目安を入力します。</li>
@@ -615,11 +614,11 @@
         <div class="divider" style="margin:14px 0"></div>
 
         <div>
-          <div class="caps">よくある使い方（例）</div>
+          <div class="caps">講師向けの使い方（例）</div>
           <ul style="margin-top:8px;padding-left:18px;line-height:1.8">
-            <li>小テスト用に<strong>難易度=10点</strong>で10問生成 → ストックから当日使う。</li>
-            <li>定期テスト対策で<strong>満点</strong>にして記述量を増やす。</li>
-            <li>「単元」や「避ける話題」に既習内容を入れて、被りを防ぐ。</li>
+            <li>授業前に<strong>要確認答案一覧</strong>で当日フォローが必要な生徒を抽出する。</li>
+            <li><strong>弱点傾向</strong>から補足説明が必要な観点を決める。</li>
+            <li>答案比較を見ながら、再提出対象と声かけ内容を整理する。</li>
           </ul>
         </div>
 
@@ -638,84 +637,6 @@
     </div>
   </div>
 
-  <div class="modal" id="purposeModal" aria-hidden="true">
-    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="purposeTitle">
-      <div class="panelHeader">
-        <div>
-          <h2 class="panelTitle" id="purposeTitle">この記述トレーナーの目的</h2>
-        </div>
-        <div class="flex" style="gap:8px">
-          <button class="btn" id="btnPurposeClose" aria-label="このアプリの目的モーダルを閉じる">閉じる</button>
-        </div>
-      </div>
-      <div class="panelBody purpose-modal-body">
-        <p>この記述トレーナーは、社会や理科で学ぶ用語や出来事の流れについて、<strong>理解を深めること</strong>を目的としています。</p>
-        <p>理科や社会を一生懸命勉強しているのに伸び悩んでしまう原因の一つは、<strong>「単語を覚えるだけ」で止まってしまうこと</strong>です。<br>
-        本当に力をつけるためには、その用語が何を意味しているのか、なぜそのような現象や出来事が起こるのか、どのような背景やつながりがあるのかまで理解することが大切です。</p>
-        <p>このアプリでは、用語を自分の言葉で説明する練習を通して、知識を「暗記」から「理解」へ変えていきます。<br>
-        はじめは抽象的で難しく感じるかもしれませんが、そのときは模範解答を見たり、AI先生に質問したりしながら、何度も記述に取り組んでみてください。</p>
-        <p>繰り返し練習することで、得点につながるだけでなく、読解力や考える力などの本質的な力も身についていきます。<br>
-        焦らず、少しずつ力を伸ばしていきましょう。</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="studyTipsModal" aria-hidden="true">
-    <div class="panel" role="dialog" aria-modal="true" aria-labelledby="studyTipsTitle">
-      <div class="panelHeader">
-        <div>
-          <h2 class="panelTitle" id="studyTipsTitle">これをすれば成績が上がる勉強法！（記述力が伸びる黄金ループ）</h2>
-          <div class="small muted">書く → 添削 → リライトを繰り返すほど、記述力は伸びます。</div>
-        </div>
-        <div class="flex" style="gap:8px">
-          <button class="btn" id="btnStudyTipsCloseX" aria-label="勉強法モーダルを閉じる">×</button>
-          <button class="btn" id="btnStudyTipsClose" aria-label="勉強法モーダルを閉じる">閉じる</button>
-        </div>
-      </div>
-
-      <div class="panelBody study-tips-body">
-        <div class="study-loop-callout">
-          <span class="caps">黄金ループ</span>
-          <p>書く → 添削 → リライト（これを3回以上！）</p>
-        </div>
-
-        <ol class="study-tip-list">
-          <li class="study-tip-item">
-            <div class="study-tip-number">1</div>
-            <div><strong>まずは一旦考えて、自分の力で解いてみる！</strong><br>最初に自力で書こうとすることで脳が働き、理解が深まります。</div>
-          </li>
-          <li class="study-tip-item">
-            <div class="study-tip-number">2</div>
-            <div><strong>すぐに出てこない時は「解説（ヒント）」を見る</strong><br>答えを丸写しするのではなく、「なぜそうなるか」のポイントをつかみましょう。</div>
-          </li>
-        </ol>
-
-        <div class="studyTips-highlight" role="note" aria-live="polite">
-          <p>解説を見ても分からなかったら、AI先生に質問してみましょう！<br>分からないところを曖昧にしたまま進めないことが、とても重要です。<br>実際に教育現場でも、「分からない部分をそのままにしてしまう癖」が原因で、成績が伸び悩んでいるケースが多く見られます。<br>小さな疑問のうちに解消するほど、理解が積み上がって記述力も安定して伸びます。</p>
-          <button class="studyTips-askBtn" id="btnStudyTipsAskAi" type="button">AI先生、ここが分かりません！</button>
-          <div class="small muted" id="studyTipsAskStatus" aria-live="polite"></div>
-        </div>
-
-        <ol class="study-tip-list" start="3">
-          <li class="study-tip-item">
-            <div class="study-tip-number">3</div>
-            <div><strong>そのあと、もう一度“自分の言葉”で書いてみる</strong><br>おすすめの型は「結論 → 理由 → 具体例（根拠）」です。短くても形が整うと点が伸びます。</div>
-          </li>
-          <li class="study-tip-item">
-            <div class="study-tip-number">4</div>
-            <div><strong>添削後は、講評を確認してリライトする</strong><br>良かった点と改善点を1つずつ押さえて、同じミスを繰り返さないのがコツです。</div>
-          </li>
-          <li class="study-tip-item">
-            <div class="study-tip-number">5</div>
-            <div><strong>これを最低3回くり返す（書く→添削→リライト）</strong><br>回数を重ねるほど、書き方が体に入り、記述力が確実に身につきます。</div>
-          </li>
-        </ol>
-
-        <p class="study-tip-closing">大事なのは<strong>「理解して定着させること」</strong>。それができれば、成績は必ず上がります。いきましょう！</p>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- =========================
        ✅ ストック モーダル
@@ -911,6 +832,7 @@
     const ASSIST_TEMPLATE = '結論：＿＿＿＿。理由：＿＿＿＿。具体例：＿＿＿＿。まとめ：＿＿＿＿。';
 
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
+    const APP_MODE = 'teacher';
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
     const ANON_USER_ID_KEY = 'anonUserId';
@@ -1103,7 +1025,7 @@
 
     // ---- 共通Fetch ----
     async function apiGet(path){
-      const headers = {'X-User-Id': ensureAnonUserId()};
+      const headers = {'X-User-Id': ensureAnonUserId(), 'X-App-Mode': APP_MODE};
       const nickname = getNickname();
       if(nickname) headers['X-User-Label'] = nickname;
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -1135,7 +1057,7 @@
     }
 
     async function apiPost(path, body){
-      const headers = {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId()};
+      const headers = {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId(), 'X-App-Mode': APP_MODE};
       const nickname = getNickname();
       if(nickname) headers['X-User-Label'] = nickname;
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
@@ -1214,7 +1136,7 @@
     async function postFeedback(payload){
       const res = await fetch(cfg.endpoint('/feedback'), {
         method: 'POST',
-        headers: {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId(), ...(getNickname() ? {'X-User-Label': getNickname()} : {})},
+        headers: {'Content-Type':'application/json', 'X-User-Id': ensureAnonUserId(), 'X-App-Mode': APP_MODE, ...(getNickname() ? {'X-User-Label': getNickname()} : {})},
         body: JSON.stringify(payload || {})
       });
       let data = null;
@@ -1550,50 +1472,17 @@
       closeModal('howtoModal', '#btnHowto');
     }
 
-    function openPurpose(){
-      openModal('purposeModal', '#btnPurposeClose');
+    function scrollToElement(el){
+      if(!el) return;
+      el.scrollIntoView({behavior:'smooth', block:'start'});
     }
 
-    function closePurpose(){
-      closeModal('purposeModal', '#btnPurpose');
+    function jumpToNeedsReview(){
+      scrollToElement($('#needsReviewList'));
     }
 
-    function openStudyTips(){
-      openModal('studyTipsModal', '#btnStudyTipsClose');
-    }
-
-    function closeStudyTips(){
-      closeModal('studyTipsModal', '#btnStudyTips');
-    }
-
-    function openAiTeacherFromStudyTips(){
-      const status = $('#studyTipsAskStatus');
-      if(status) status.textContent = '';
-
-      const aiModal = document.getElementById('aiTeacherModal');
-      if(typeof openAiTeacher === 'function' && aiModal){
-        closeModal('studyTipsModal');
-        openAiTeacher();
-        $('#aiTeacherStatus') && ($('#aiTeacherStatus').textContent = '勉強法モーダルから質問を開きました。');
-        return;
-      }
-
-      const aiFab = document.getElementById('btnAiTeacher') || document.getElementById('aiTeacherFab');
-      if(aiFab && typeof aiFab.click === 'function'){
-        closeModal('studyTipsModal');
-        aiFab.click();
-        return;
-      }
-
-      if(aiModal){
-        closeModal('studyTipsModal');
-        openAiTeacher();
-        return;
-      }
-
-      const msg = 'AI先生ボタンが見つかりませんでした。右下のAI先生アイコンが表示されているか確認してください。';
-      if(status) status.textContent = msg;
-      console.warn(msg);
+    function jumpToWeakness(){
+      scrollToElement($('#studentWeaknessList'));
     }
 
     function openStockModal(){
@@ -1787,20 +1676,6 @@
       refreshUsage();
       refreshStockSummary();
       refreshTeacherDashboard();
-
-      const quickStartDismissed = localStorage.getItem("quickstart_dismissed_v1");
-      if(quickStartDismissed){
-        const qs = $("#quickStartCard");
-        if(qs) qs.style.display = "none";
-      }
-
-      const studyTipsSeenKey = 'studyTips_seen_v1';
-      try{
-        if(!localStorage.getItem(studyTipsSeenKey)){
-          openStudyTips();
-          localStorage.setItem(studyTipsSeenKey, '1');
-        }
-      }catch(e){}
     }
 
     // ---- 生成UIロジック ----
@@ -2819,11 +2694,8 @@
     $('#btnRefreshTeacherDashboard')?.addEventListener('click', refreshTeacherDashboard);
 
     $('#btnHowto')?.addEventListener('click', openHowto);
-    $('#btnHideQuickStart')?.addEventListener('click', ()=>{
-      const qs = $('#quickStartCard');
-      if(qs) qs.style.display = 'none';
-      localStorage.setItem('quickstart_dismissed_v1', '1');
-    });
+    $('#btnJumpNeedsReview')?.addEventListener('click', jumpToNeedsReview);
+    $('#btnJumpWeakness')?.addEventListener('click', jumpToWeakness);
     $('#btnToggleTopActions')?.addEventListener('click', ()=>{
       const wrap = $('#topActions');
       const btn = $('#btnToggleTopActions');
@@ -2836,19 +2708,6 @@
       if(e.target === e.currentTarget) closeHowto();
     });
 
-    $('#btnPurpose')?.addEventListener('click', openPurpose);
-    $('#btnPurposeClose')?.addEventListener('click', closePurpose);
-    $('#purposeModal')?.addEventListener('click', (e)=>{
-      if(e.target === e.currentTarget) closePurpose();
-    });
-
-    $('#btnStudyTips')?.addEventListener('click', openStudyTips);
-    $('#btnStudyTipsClose')?.addEventListener('click', closeStudyTips);
-    $('#btnStudyTipsCloseX')?.addEventListener('click', closeStudyTips);
-    $('#btnStudyTipsAskAi')?.addEventListener('click', openAiTeacherFromStudyTips);
-    $('#studyTipsModal')?.addEventListener('click', (e)=>{
-      if(e.target === e.currentTarget) closeStudyTips();
-    });
 
     $('#btnOpenStock').onclick = openStockModal;
     $('#btnStockClose').onclick = closeStockModal;
@@ -2949,15 +2808,11 @@
 
     document.addEventListener('keydown', (e)=>{
       const howto = $('#howtoModal');
-      const purpose = $('#purposeModal');
-      const studyTips = $('#studyTipsModal');
       const fb = $('#feedbackModal');
       const stock = $('#stockModal');
       const ai = $('#aiTeacherModal');
       if(e.key === 'Escape'){
         if(howto && howto.classList.contains('show')) closeHowto();
-        if(purpose && purpose.classList.contains('show')) closePurpose();
-        if(studyTips && studyTips.classList.contains('show')) closeStudyTips();
         if(fb && fb.classList.contains('show')) closeFeedback();
         if(stock && stock.classList.contains('show')) closeStockModal();
         if(ai && ai.classList.contains('show')) closeAiTeacher();

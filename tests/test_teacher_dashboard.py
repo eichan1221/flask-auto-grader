@@ -72,5 +72,34 @@ class TeacherDashboardTests(unittest.TestCase):
         self.assertEqual(body["items"][0]["latest_score"], 8)
 
 
+class DailyLimitBypassTests(unittest.TestCase):
+    def setUp(self):
+        grader_app.app.config["TESTING"] = True
+        self.client = grader_app.app.test_client()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.orig_usage_dir = grader_app.USAGE_DIR
+        self.orig_enable = grader_app.ENABLE_DAILY_LIMIT
+        self.orig_bypass = grader_app.DAILY_LIMIT_BYPASS_FOR_TEACHER
+        grader_app.USAGE_DIR = Path(self.tmpdir.name)
+        grader_app.USAGE_DIR.mkdir(parents=True, exist_ok=True)
+        grader_app.ENABLE_DAILY_LIMIT = True
+        grader_app.DAILY_LIMIT_BYPASS_FOR_TEACHER = True
+
+    def tearDown(self):
+        grader_app.USAGE_DIR = self.orig_usage_dir
+        grader_app.ENABLE_DAILY_LIMIT = self.orig_enable
+        grader_app.DAILY_LIMIT_BYPASS_FOR_TEACHER = self.orig_bypass
+        self.tmpdir.cleanup()
+
+    def test_api_usage_reports_teacher_mode_bypass(self):
+        res = self.client.get('/api/usage', headers={'X-App-Mode': 'teacher', 'X-User-Id': 'tester'})
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertTrue(body['ok'])
+        self.assertTrue(body['enabled'])
+        self.assertTrue(body['bypassed'])
+        self.assertEqual(body['mode'], 'teacher')
+
+
 if __name__ == "__main__":
     unittest.main()
