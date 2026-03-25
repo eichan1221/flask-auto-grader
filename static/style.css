@@ -275,6 +275,37 @@ textarea{min-height:120px;resize:vertical}
   border:1px solid #ddd6fe;
   color:#5b21b6;
 }
+.dashboard-filters{
+  display:flex;
+  gap:8px;
+  margin:8px 0 10px;
+}
+.dashboard-filters select{
+  max-width:170px;
+  font-size:13px;
+  padding:8px 10px;
+}
+.meta-row{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin:6px 0;
+}
+.meta-chip{
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--border);
+  background:#f8fafc;
+  color:#334155;
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:11px;
+}
+.meta-chip.state{
+  background:#ede9fe;
+  border-color:#ddd6fe;
+  color:#5b21b6;
+}
 
 /* 学習履歴 */
 .history-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}

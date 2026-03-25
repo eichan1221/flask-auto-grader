@@ -234,6 +234,28 @@ def _normalize_log_categories(cats: Any) -> List[str]:
             out.append(nc)
     return out
 
+def infer_question_type_label(question: str, tags: Optional[List[str]] = None) -> str:
+    q = normalize_text(question)
+    tags_text = " ".join([normalize_text(t) for t in (tags or [])])
+    merged = f"{q} {tags_text}"
+    if re.search(r"なぜ|理由|どうして|背景", merged):
+        return "理由説明"
+    if re.search(r"結果|影響|変化|起こった", merged):
+        return "因果説明"
+    if re.search(r"比較|違い|共通点|比べ", merged):
+        return "比較説明"
+    if re.search(r"用語|とは|説明しなさい|定義", merged):
+        return "用語説明"
+    return "記述説明"
+
+def build_question_brief(preview: str, qkey: str) -> str:
+    text = normalize_text(preview)
+    if text:
+        return text[:36]
+    if qkey:
+        return f"問題-{qkey[:6]}"
+    return "問題未設定"
+
 
 def _load_grading_events(limit: int = 500) -> List[Dict[str, Any]]:
     logs = [r for r in iter_jsonl(LOG_DIR / "grading.jsonl") if r.get("event") == "graded"]
@@ -1903,11 +1925,21 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
         max_points = int(rec.get("max_points", 10) or 10)
         answer_length = int(rec.get("answer_length", 0) or 0)
         ai_flag = bool(rec.get("ai_review_flag", False))
+        subject = normalize_text(rec.get("subject", "")) or "未設定"
+        category = normalize_text(rec.get("category", "")) or "未設定"
+        unit = normalize_text(rec.get("unit", "")) or ""
+        question_preview = rec.get("question_preview", "（問題テキスト非表示）")
+        question_type = normalize_text(rec.get("question_type", "")) or infer_question_type_label(
+            question_preview,
+            rec.get("tags", []) if isinstance(rec.get("tags"), list) else [],
+        )
         low_score_threshold = 6 if max_points == 10 else int(max_points * 0.6)
         short_answer_threshold = 20 if max_points == 10 else 35
         low_attempts = [h for h in history if int(h.get("score", 0) or 0) < low_score_threshold]
         low_streak = int(rec.get("low_performance_streak", 0) or 0)
         rewrite_count = max(len(history) - 1, 0)
+        prev_score = int(history[-2].get("score", score) or score) if len(history) >= 2 else score
+        score_delta = score - prev_score
 
         recent_cats = _normalize_log_categories(rec.get("weakness_categories", []))
         consecutive_same_weakness = []
@@ -1961,15 +1993,22 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
                 "request_id": rec.get("request_id", ""),
                 "student_label": student_labels.get(user_key, user_key),
                 "user_key": user_key,
-                "question": rec.get("question_preview", "（問題テキスト非表示）"),
+                "question": question_preview,
+                "question_brief": build_question_brief(question_preview, qkey),
                 "question_key": qkey,
+                "subject": subject,
+                "category": category,
+                "unit": unit,
+                "question_type": question_type,
                 "score": score,
                 "max_points": max_points,
+                "score_delta": score_delta,
                 "rewrite_count": rewrite_count,
                 "attempt_count": len(history),
                 "weakness_categories": recent_cats,
                 "reasons": reasons,
                 "reason_codes": reason_codes,
+                "status_label": "再提出あり" if rewrite_count > 0 else "初回提出",
                 "low_performance_streak": low_streak,
                 "same_weakness_streak": same_weakness_streak,
                 "priority_score": risk_score,
@@ -2009,6 +2048,11 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
             "recent_focus_window": recent_focus_window,
             "weakness_total": total,
             "recent_answers": len(recent_rows),
+            "latest_question_brief": build_question_brief(recent_rows[0].get("question_preview", ""), normalize_text(recent_rows[0].get("question_key", ""))),
+            "latest_subject": normalize_text(recent_rows[0].get("subject", "")) or "未設定",
+            "latest_category": normalize_text(recent_rows[0].get("category", "")) or "未設定",
+            "latest_unit": normalize_text(recent_rows[0].get("unit", "")) or "",
+            "submission_count_total": len(rows),
         })
         if total >= 3:
             weak_students.add(student_labels.get(user_key, user_key))
@@ -2083,6 +2127,11 @@ def api_teacher_student(user_key: str):
         items.append({
             "question_key": qkey,
             "question": latest.get("question_preview", "（問題テキスト非表示）"),
+            "question_brief": build_question_brief(latest.get("question_preview", ""), qkey),
+            "subject": normalize_text(latest.get("subject", "")) or "未設定",
+            "category": normalize_text(latest.get("category", "")) or "未設定",
+            "unit": normalize_text(latest.get("unit", "")) or "",
+            "question_type": normalize_text(latest.get("question_type", "")) or infer_question_type_label(latest.get("question_preview", ""), latest.get("tags", [])),
             "attempt_count": len(rows),
             "latest_score": int(latest.get("score", 0) or 0),
             "max_points": int(latest.get("max_points", 10) or 10),
@@ -3186,12 +3235,17 @@ def grade_answer():
     teacher_request = _is_teacher_request()
     stock_subject = ""
     stock_category = ""
+    stock_unit = ""
+    stock_tags: List[str] = []
     stock_id = data.get("stock_id", "")
     if stock_id:
         stock = load_stock_item(STOCK_DIR / f"{stock_id}.json") or {}
         if isinstance(stock, dict):
             stock_subject = normalize_text(stock.get("subject", ""))[:20]
             stock_category = normalize_text(stock.get("category", ""))[:20]
+            stock_unit = normalize_text(stock.get("unit", ""))[:60]
+            stock_tags = stock.get("tags", []) if isinstance(stock.get("tags"), list) else []
+    q_type = infer_question_type_label(data["question"], stock_tags)
 
     user_label = normalize_text(request.headers.get("X-User-Label", ""))[:40]
     weakness_categories = infer_weakness_categories(rubric, weak_tags, answer_length)
@@ -3243,6 +3297,7 @@ def grade_answer():
         "user_id_masked": user_id_masked,
         "subject": stock_subject,
         "category": stock_category,
+        "unit": stock_unit,
         "score": score_total_scaled,
         "max_points": max_score,
         "score_raw": score_total_raw,
@@ -3255,6 +3310,7 @@ def grade_answer():
         "answer_length": answer_length,
         "question_key": qkey,
         "question_preview": normalize_text(data["question"])[:120],
+        "question_type": q_type,
         "weakness_categories": weakness_categories,
         "low_performance_streak": low_streak,
         "same_weakness_streak": same_cat_streak,
