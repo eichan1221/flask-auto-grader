@@ -55,6 +55,19 @@
       <div class="grid-2" style="margin-top:10px">
         <div class="qcard">
           <div class="small muted">要確認答案一覧</div>
+          <div class="dashboard-filters">
+            <select id="reviewSubjectFilter">
+              <option value="">全教科</option>
+              <option value="社会">社会</option>
+              <option value="理科">理科</option>
+              <option value="未設定">未設定</option>
+            </select>
+            <select id="reviewStateFilter">
+              <option value="">全状態</option>
+              <option value="初回提出">初回提出</option>
+              <option value="再提出あり">再提出あり</option>
+            </select>
+          </div>
           <div id="needsReviewList" class="list" style="max-height:240px"></div>
         </div>
         <div class="qcard">
@@ -1317,7 +1330,13 @@
           div.className = 'item';
           const improved = Number(it.latest_score ?? 0) - Number(it.first_score ?? 0);
           div.innerHTML = `
-            <div><b>${escapeHtml((it.question || '').slice(0, 48))}</b></div>
+            <div><b>${escapeHtml((it.question_brief || it.question || '').slice(0, 48))}</b></div>
+            <div class="meta-row">
+              <span class="meta-chip">${escapeHtml(it.subject || '未設定')}</span>
+              <span class="meta-chip">${escapeHtml(it.category || '未設定')}</span>
+              <span class="meta-chip">${escapeHtml(it.question_type || '記述説明')}</span>
+              ${it.unit ? `<span class="meta-chip">${escapeHtml(it.unit)}</span>` : ''}
+            </div>
             <div class="small">比較: ${escapeHtml(String(it.first_score ?? 0))} → ${escapeHtml(String(it.latest_score ?? 0))} (${improved >= 0 ? '+' : ''}${improved}) / 提出${escapeHtml(String(it.attempt_count || 1))}回</div>
             <div class="small muted">初回: ${escapeHtml(it.first_answer || '-')}</div>
             <div class="small muted">最新: ${escapeHtml(it.latest_answer || '-')}</div>
@@ -1331,6 +1350,7 @@
 
     function renderTeacherDashboard(data){
       const dash = data || {};
+      window.__lastDashboard = dash;
       const notice = $('#teacherAccessNotice');
       if(notice){
         notice.style.display = 'none';
@@ -1343,7 +1363,14 @@
       const reviewList = $('#needsReviewList');
       if(reviewList){
         reviewList.innerHTML = '';
-        const items = Array.isArray(dash.needs_review_items) ? dash.needs_review_items : [];
+        const subjectFilter = $('#reviewSubjectFilter')?.value || '';
+        const stateFilter = $('#reviewStateFilter')?.value || '';
+        const rawItems = Array.isArray(dash.needs_review_items) ? dash.needs_review_items : [];
+        const items = rawItems.filter(it=>{
+          if(subjectFilter && (it.subject || '未設定') !== subjectFilter) return false;
+          if(stateFilter && (it.status_label || '') !== stateFilter) return false;
+          return true;
+        });
         if(!items.length){
           reviewList.innerHTML = '<div class="small muted">現在、要確認答案はありません。</div>';
         }else{
@@ -1352,11 +1379,19 @@
             div.className = 'item';
             const reasons = Array.isArray(it.reasons) ? it.reasons : [];
             const reasonTags = reasons.map(r=>`<span class="reason-chip">${escapeHtml(r)}</span>`).join('');
+            const scoreDelta = Number(it.score_delta || 0);
             div.innerHTML = `
               <div><b>${escapeHtml(it.student_label || '匿名生徒')}</b> / ${escapeHtml((it.score ?? 0) + '点')} <span class="priority-chip">優先度:${escapeHtml(String(it.priority_score || 0))}</span></div>
-              <div class="small muted">${escapeHtml((it.question || '').slice(0,60))}</div>
+              <div class="small"><b>${escapeHtml((it.question_brief || it.question || '').slice(0,60))}</b></div>
+              <div class="meta-row">
+                <span class="meta-chip">${escapeHtml(it.subject || '未設定')}</span>
+                <span class="meta-chip">${escapeHtml(it.category || '未設定')}</span>
+                <span class="meta-chip">${escapeHtml(it.question_type || '記述説明')}</span>
+                ${it.unit ? `<span class="meta-chip">${escapeHtml(it.unit)}</span>` : ''}
+                <span class="meta-chip state">${escapeHtml(it.status_label || '初回提出')}</span>
+              </div>
               <div class="reason-chip-row">${reasonTags || '<span class="small muted">判定理由なし</span>'}</div>
-              <div class="small">提出回数: ${escapeHtml(String(it.attempt_count || 1))}（リライト ${escapeHtml(String(it.rewrite_count || 0))}回）</div>
+              <div class="small">提出回数: ${escapeHtml(String(it.attempt_count || 1))}（リライト ${escapeHtml(String(it.rewrite_count || 0))}回） / 点数変化: ${scoreDelta >= 0 ? '+' : ''}${escapeHtml(String(scoreDelta))}</div>
               <div class="small muted">低得点連続: ${escapeHtml(String(it.low_performance_streak || 0))} / 同一弱点連続: ${escapeHtml(String(it.same_weakness_streak || 0))}</div>
               <button class="btn small" data-drill-user="${escapeHtml(it.user_key || '')}">この生徒の履歴を見る</button>
             `;
@@ -1386,6 +1421,13 @@
               : '';
             div.innerHTML = `
               <div><b>${escapeHtml(s.student_label || s.user_key || '匿名')}</b></div>
+              <div class="small muted">直近取り組み: ${escapeHtml(s.latest_question_brief || '-')}</div>
+              <div class="meta-row">
+                <span class="meta-chip">${escapeHtml(s.latest_subject || '未設定')}</span>
+                <span class="meta-chip">${escapeHtml(s.latest_category || '未設定')}</span>
+                ${s.latest_unit ? `<span class="meta-chip">${escapeHtml(s.latest_unit)}</span>` : ''}
+                <span class="meta-chip">${escapeHtml(String(s.submission_count_total || s.recent_answers || 0))}件提出</span>
+              </div>
               <div class="small">主要弱点: ${escapeHtml((s.top_weaknesses || []).join(' / ') || '-')}</div>
               <div class="small muted">直近${escapeHtml(String(dash.weakness_window || 10))}件集計: ${escapeHtml(detail || '-')}</div>
               <div class="small">累積内訳: ${escapeHtml(ranked)}</div>
@@ -1423,6 +1465,13 @@
         }
       }
     }
+
+    ['reviewSubjectFilter', 'reviewStateFilter'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el){
+        el.addEventListener('change', ()=> renderTeacherDashboard(window.__lastDashboard || {}));
+      }
+    });
 
     function renderComparisonPanel(result, latestAnswer){
       const card = $('#answerComparisonCard');
