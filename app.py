@@ -1904,24 +1904,57 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
         answer_length = int(rec.get("answer_length", 0) or 0)
         ai_flag = bool(rec.get("ai_review_flag", False))
         low_score_threshold = 6 if max_points == 10 else int(max_points * 0.6)
+        short_answer_threshold = 20 if max_points == 10 else 35
         low_attempts = [h for h in history if int(h.get("score", 0) or 0) < low_score_threshold]
+        low_streak = int(rec.get("low_performance_streak", 0) or 0)
+        rewrite_count = max(len(history) - 1, 0)
 
         recent_cats = _normalize_log_categories(rec.get("weakness_categories", []))
         consecutive_same_weakness = []
+        same_weakness_streak = int(rec.get("same_weakness_streak", 0) or 0)
         if len(history) >= 2:
             prev = _normalize_log_categories(history[-2].get("weakness_categories", []))
             consecutive_same_weakness = [c for c in recent_cats if c in prev]
+            if same_weakness_streak <= 1 and consecutive_same_weakness:
+                same_weakness_streak = 2
 
         reasons: List[str] = []
-        if len(history) >= 3 and len(low_attempts) >= 3 and all(int(h.get("score", 0) or 0) < low_score_threshold for h in history[-3:]):
+        reason_codes: List[str] = []
+        risk_score = 0
+
+        if rewrite_count >= 2 and score < low_score_threshold:
             reasons.append("2回以上再提出しても基準未満")
+            reason_codes.append("low_score_after_rewrites")
+            risk_score += 3
             resubmission_waiting.add(student_labels.get(user_key, user_key))
+        elif len(history) >= 3 and all(int(h.get("score", 0) or 0) < low_score_threshold for h in history[-3:]):
+            reasons.append("連続して基準未満（直近3回）")
+            reason_codes.append("three_low_scores_in_row")
+            risk_score += 3
+            resubmission_waiting.add(student_labels.get(user_key, user_key))
+        elif low_streak >= 2:
+            reasons.append(f"低得点が継続中（{low_streak}回）")
+            reason_codes.append("low_performance_streak")
+            risk_score += 2
+            resubmission_waiting.add(student_labels.get(user_key, user_key))
+
         if consecutive_same_weakness:
             reasons.append(f"同じ弱点が連続: {' / '.join(consecutive_same_weakness[:2])}")
-        if answer_length < 20:
+            reason_codes.append("consecutive_same_weakness")
+            risk_score += 2
+        if same_weakness_streak >= 3:
+            reasons.append(f"同一観点の弱点が停滞（{same_weakness_streak}回）")
+            reason_codes.append("same_weakness_streak")
+            risk_score += 2
+
+        if answer_length < short_answer_threshold:
             reasons.append("解答が短すぎる")
+            reason_codes.append("answer_too_short")
+            risk_score += 1
         if ai_flag:
             reasons.append("AI要確認フラグ")
+            reason_codes.append("ai_review_flag")
+            risk_score += 3
 
         if reasons:
             review_items.append({
@@ -1932,10 +1965,14 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
                 "question_key": qkey,
                 "score": score,
                 "max_points": max_points,
-                "rewrite_count": max(len(history) - 1, 0),
+                "rewrite_count": rewrite_count,
                 "attempt_count": len(history),
                 "weakness_categories": recent_cats,
                 "reasons": reasons,
+                "reason_codes": reason_codes,
+                "low_performance_streak": low_streak,
+                "same_weakness_streak": same_weakness_streak,
+                "priority_score": risk_score,
                 "ts": int(rec.get("ts", 0) or 0),
             })
 
@@ -1955,20 +1992,35 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
         sorted_weak = sorted(weakness_counter.items(), key=lambda x: x[1], reverse=True)
         top = [name for name, _ in sorted_weak[:2]]
         top_ratio = [{"category": n, "count": cnt, "rate": round(cnt / len(recent_rows), 2)} for n, cnt in sorted_weak[:3]]
+        recent_focus_window = min(4, len(recent_rows))
+        recent_focus_counter: Dict[str, int] = {}
+        for row in recent_rows[:recent_focus_window]:
+            for c in _normalize_log_categories(row.get("weakness_categories", [])):
+                recent_focus_counter[c] = recent_focus_counter.get(c, 0) + 1
+        recent_hot = sorted(recent_focus_counter.items(), key=lambda x: x[1], reverse=True)[:2]
         students.append({
             "student_label": student_labels.get(user_key, user_key),
             "user_key": user_key,
             "top_weaknesses": top,
             "top_weakness_details": top_ratio,
             "weakness_counts": weakness_counter,
+            "weakness_ranked": [{"category": n, "count": cnt} for n, cnt in sorted_weak],
+            "recent_hot_weaknesses": [{"category": n, "count": cnt} for n, cnt in recent_hot],
+            "recent_focus_window": recent_focus_window,
             "weakness_total": total,
             "recent_answers": len(recent_rows),
         })
         if total >= 3:
             weak_students.add(student_labels.get(user_key, user_key))
 
-    review_items.sort(key=lambda x: x.get("ts", 0), reverse=True)
-    students.sort(key=lambda x: x.get("weakness_total", 0), reverse=True)
+    review_items.sort(key=lambda x: (x.get("priority_score", 0), x.get("ts", 0)), reverse=True)
+    students.sort(
+        key=lambda x: (
+            x.get("weakness_total", 0),
+            sum(i.get("count", 0) for i in x.get("recent_hot_weaknesses", [])),
+        ),
+        reverse=True,
+    )
 
     return {
         "submitted_count": submission_count,

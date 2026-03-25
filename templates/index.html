@@ -58,7 +58,7 @@
           <div id="needsReviewList" class="list" style="max-height:240px"></div>
         </div>
         <div class="qcard">
-          <div class="small muted">生徒ごとの弱点傾向（5分類）</div>
+          <div class="small muted">生徒ごとの弱点傾向（5分類 / 多い順）</div>
           <div id="studentWeaknessList" class="list" style="max-height:240px"></div>
         </div>
       </div>
@@ -1350,11 +1350,14 @@
           items.forEach(it=>{
             const div = document.createElement('div');
             div.className = 'item';
+            const reasons = Array.isArray(it.reasons) ? it.reasons : [];
+            const reasonTags = reasons.map(r=>`<span class="reason-chip">${escapeHtml(r)}</span>`).join('');
             div.innerHTML = `
-              <div><b>${escapeHtml(it.student_label || '匿名生徒')}</b> / ${escapeHtml((it.score ?? 0) + '点')}</div>
+              <div><b>${escapeHtml(it.student_label || '匿名生徒')}</b> / ${escapeHtml((it.score ?? 0) + '点')} <span class="priority-chip">優先度:${escapeHtml(String(it.priority_score || 0))}</span></div>
               <div class="small muted">${escapeHtml((it.question || '').slice(0,60))}</div>
-              <div class="small">理由: ${escapeHtml((it.reasons || []).join(' / '))}</div>
-              <div class="small">提出回数: ${escapeHtml(String(it.attempt_count || 1))}</div>
+              <div class="reason-chip-row">${reasonTags || '<span class="small muted">判定理由なし</span>'}</div>
+              <div class="small">提出回数: ${escapeHtml(String(it.attempt_count || 1))}（リライト ${escapeHtml(String(it.rewrite_count || 0))}回）</div>
+              <div class="small muted">低得点連続: ${escapeHtml(String(it.low_performance_streak || 0))} / 同一弱点連続: ${escapeHtml(String(it.same_weakness_streak || 0))}</div>
               <button class="btn small" data-drill-user="${escapeHtml(it.user_key || '')}">この生徒の履歴を見る</button>
             `;
             reviewList.appendChild(div);
@@ -1375,10 +1378,18 @@
             const detail = Array.isArray(s.top_weakness_details)
               ? s.top_weakness_details.map(x=>`${x.category}:${x.count}/${s.recent_answers || 0}`).join(' / ')
               : '';
+            const ranked = Array.isArray(s.weakness_ranked)
+              ? s.weakness_ranked.slice(0, 5).map(x=>`${x.category}:${x.count}件`).join(' / ')
+              : '-';
+            const recentHot = Array.isArray(s.recent_hot_weaknesses)
+              ? s.recent_hot_weaknesses.map(x=>`${x.category}:${x.count}件`).join(' / ')
+              : '';
             div.innerHTML = `
               <div><b>${escapeHtml(s.student_label || s.user_key || '匿名')}</b></div>
               <div class="small">主要弱点: ${escapeHtml((s.top_weaknesses || []).join(' / ') || '-')}</div>
               <div class="small muted">直近${escapeHtml(String(dash.weakness_window || 10))}件集計: ${escapeHtml(detail || '-')}</div>
+              <div class="small">累積内訳: ${escapeHtml(ranked)}</div>
+              <div class="small muted">直近${escapeHtml(String(s.recent_focus_window || 0))}件で多い弱点: ${escapeHtml(recentHot || '-')}</div>
               <button class="btn small" data-drill-user="${escapeHtml(s.user_key || '')}">答案履歴と比較を表示</button>
             `;
             weakList.appendChild(div);
