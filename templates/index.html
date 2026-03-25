@@ -132,8 +132,13 @@
         </div>
 
         <div class="stock-guide">
-          <div class="small muted">固定問題の選び方</div>
-          <div class="small">① 教科（社会/理科）を選ぶ → ② 単元や分類で絞る → ③ ストック一覧から問題を選択して採点へ進む</div>
+          <div class="small muted">講師向け：固定ストック問題の進め方</div>
+          <ol class="stock-guide-steps">
+            <li>教科（社会/理科）と分類を選ぶ</li>
+            <li>「ストックを開く」で固定問題を選択する</li>
+            <li>選んだ問題でそのまま採点し、生徒フォローに進む</li>
+          </ol>
+          <div class="small">※ 自動生成はMVPでは前面に出さず、固定ストック運用を基本導線にしています。</div>
         </div>
 
         <div class="grid-2">
@@ -1031,22 +1036,28 @@
       if(cfg.accessCode) headers['X-Access-Code'] = cfg.accessCode;
       const res = await fetch(cfg.endpoint(path), {headers});
       if(!res.ok){
+        let payload = null;
+        try{
+          payload = await res.json();
+        }catch(e){
+          payload = null;
+        }
         if(res.status === 403) {
-          const err = new Error('403 Forbidden: ACCESS_CODE が必要/不一致の可能性');
+          const detail = payload?.message || 'ACCESS_CODE が必要、または一致していません。';
+          const err = new Error(`403 Forbidden: ${detail}`);
           err.status = 403;
+          err.code = payload?.error || 'forbidden';
+          err.raw = payload;
           throw err;
         }
         let msg = `${res.status} ${res.statusText}`;
-        let requestId = '';
-        try {
-          const j = await res.json();
-          if(j && j.error){ msg += `: ${j.error}`; }
-          if(j && j.message && !msg.includes(j.message)){ msg += ` / ${j.message}`; }
-          if(j && j.request_id){ requestId = j.request_id; }
-        } catch(e){}
+        let requestId = payload?.request_id || '';
+        if(payload && payload.error){ msg += `: ${payload.error}`; }
+        if(payload && payload.message && !msg.includes(payload.message)){ msg += ` / ${payload.message}`; }
         const err = new Error(msg);
         err.status = res.status;
         err.requestId = requestId;
+        err.raw = payload;
         throw err;
       }
       try{
@@ -1395,7 +1406,9 @@
       }catch(e){
         if(notice){
           notice.style.display = '';
-          notice.textContent = '講師トップを表示するにはACCESS_CODE認証が必要です（現在は未認証）。';
+          notice.textContent = e?.message?.startsWith('403 Forbidden:')
+            ? e.message.replace('403 Forbidden: ', '')
+            : '講師トップの取得に失敗しました。設定のACCESS_CODEと接続先を確認してください。';
         }
       }
     }

@@ -2002,7 +2002,11 @@ def api_teacher_dashboard():
 @app.get("/api/teacher/student/<user_key>")
 def api_teacher_student(user_key: str):
     if ACCESS_CODE and not _is_teacher_request():
-        return jsonify({"ok": False, "error": "teacher_access_required"}), 403
+        return jsonify({
+            "ok": False,
+            "error": "teacher_access_required",
+            "message": "生徒別の答案比較はACCESS_CODE認証後に利用できます。設定からACCESS_CODEを入力してください。",
+        }), 403
 
     target = normalize_text(user_key)
     logs = [
