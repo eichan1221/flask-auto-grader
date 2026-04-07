@@ -307,6 +307,10 @@ def enrich_stock_item(item: Dict[str, Any]) -> Dict[str, Any]:
     enriched["max_points"] = max_points_int
     enriched["exam_style"] = exam_style_label(normalize_text(enriched.get("exam_style", "定期テスト"))[:20])
     enriched["learner_phase"] = learner_phase_label(normalize_text(enriched.get("learner_phase", "standard"))[:20])
+    q_type = normalize_text(enriched.get("question_type", ""))[:20]
+    if not q_type:
+        q_type = infer_question_type_label(question, enriched.get("tags") if isinstance(enriched.get("tags"), list) else [])
+    enriched["question_type"] = q_type or "記述説明"
     return enriched
 
 def current_stocks() -> List[Dict[str, Any]]:
@@ -2550,6 +2554,10 @@ def stock_add():
     if grade and grade not in ALLOWED_GRADES:
         grade = ""
     unit = normalize_text(data.get("unit", ""))[:60]
+    question_type = normalize_text(data.get("question_type", ""))[:20]
+    model_answer = normalize_text(data.get("model_answer", ""))[:2000]
+    explanation = (data.get("explanation", "") or "").strip()
+    intention = (data.get("intention", "") or "").strip()
 
     dup = find_duplicate_in_stocks(question, subject=subject, category=category, grade=grade)
     if dup:
@@ -2569,6 +2577,10 @@ def stock_add():
         "exam_style": exam_style_label(normalize_text(data.get("exam_style", "定期テスト"))[:20]),
         "learner_phase": learner_phase_label(normalize_text(data.get("learner_phase", "standard"))[:20]),
         "tags": (data.get("tags", []) if isinstance(data.get("tags", []), list) else [])[:10],
+        "question_type": question_type or infer_question_type_label(question),
+        "model_answer": model_answer,
+        "explanation": explanation,
+        "intention": intention,
         "source": "manual",
         "created_at": now_ms(),
     }
@@ -2677,6 +2689,7 @@ def stock_import():
             "model_answer": normalize_text(raw.get("model_answer", ""))[:2000],
             "explanation": (raw.get("explanation", "") or "").strip(),
             "intention": (raw.get("intention", "") or "").strip(),
+            "question_type": normalize_text(raw.get("question_type", ""))[:20] or infer_question_type_label(q, raw.get("tags", []) if isinstance(raw.get("tags"), list) else []),
             "source": raw.get("source", "import"),
             "created_at": int(raw.get("created_at", now_ms())),
         }

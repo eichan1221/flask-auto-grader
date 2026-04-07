@@ -146,6 +146,9 @@ textarea{min-height:120px;resize:vertical}
   font-size:12px;
   font-weight:700;
 }
+.role-switch{display:inline-flex;gap:6px}
+.role-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.stock-manage textarea{min-height:92px}
 .icon-btn{
   width:40px;
   min-width:40px;

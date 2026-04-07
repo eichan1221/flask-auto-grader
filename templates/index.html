@@ -17,7 +17,11 @@
       </div>
       <button class="btn small ghost mobile-toolbar-toggle" id="btnToggleTopActions" type="button" aria-expanded="false">メニュー</button>
       <div class="flex top-actions" id="topActions" style="gap:8px;align-items:center">
-        <span class="toolbar-note">講師向けダッシュボードを優先表示中</span>
+        <span class="toolbar-note" id="roleBadge">講師向けダッシュボードを優先表示中</span>
+        <div class="role-switch" role="group" aria-label="画面ロール切替">
+          <button class="btn small role-btn active" id="btnRoleTeacher" type="button">講師用</button>
+          <button class="btn small role-btn" id="btnRoleStudent" type="button">生徒用</button>
+        </div>
         <button class="btn small ghost icon-btn" id="btnHowto" title="ヘルプを開く" aria-label="ヘルプを開く">?</button>
         <button class="btn ghost" id="btnSettings">設定</button>
         <button class="btn ghost" id="btnReload">再読込</button>
@@ -28,7 +32,7 @@
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
     <div id="errorBanner" class="error-banner" style="display:none" role="alert" aria-live="assertive"></div>
 
-    <section class="coach-hero" aria-labelledby="coachHeroTitle">
+    <section class="coach-hero" id="teacherHero" aria-labelledby="coachHeroTitle">
       <div>
         <div class="caps">講師向け支援</div>
         <h2 id="coachHeroTitle">最初に見るべき答案と生徒状況をひと目で確認</h2>
@@ -40,7 +44,7 @@
       </div>
     </section>
 
-    <section class="card" id="teacherDashboard" aria-labelledby="teacherDashboardTitle">
+    <section class="card" id="teacherDashboard" data-role="teacher" aria-labelledby="teacherDashboardTitle">
       <div id="teacherAccessNotice" class="notice" style="display:none"></div>
       <div class="toolbar">
         <h2 id="teacherDashboardTitle">講師トップ（優先確認）</h2>
@@ -81,7 +85,7 @@
       </div>
     </section>
 
-    <details class="card quickstart-collapsible" id="quickStartCard">
+    <details class="card quickstart-collapsible" id="quickStartCard" data-role="teacher">
       <summary>
         <span>
           <span class="caps">補足</span>
@@ -130,7 +134,7 @@
 
     <div class="row" style="margin-top:12px">
       <!-- 左：固定ストック運用 -->
-      <section class="card" id="stockOpsSection">
+      <section class="card" id="stockOpsSection" data-role="both">
         <div class="toolbar">
           <h2>① 固定ストック問題の運用</h2>
           <div class="flex">
@@ -258,6 +262,55 @@
           </div>
         </div>
 
+        <div class="qcard stock-manage" data-role="teacher" style="margin-top:16px">
+          <div class="small muted">講師用：固定ストック問題を追加</div>
+          <div class="grid-2" style="margin-top:8px">
+            <div>
+              <label for="teacherStockSubject">教科</label>
+              <select id="teacherStockSubject">
+                <option value="社会">社会</option>
+                <option value="理科">理科</option>
+              </select>
+            </div>
+            <div>
+              <label for="teacherStockCategory">単元分類</label>
+              <select id="teacherStockCategory"></select>
+            </div>
+            <div>
+              <label for="teacherStockUnit">単元（任意）</label>
+              <input type="text" id="teacherStockUnit" maxlength="60" placeholder="例：鎌倉時代 / 光合成">
+            </div>
+            <div>
+              <label for="teacherStockType">問題タイプ</label>
+              <select id="teacherStockType">
+                <option value="理由説明">理由説明</option>
+                <option value="因果説明">因果説明</option>
+                <option value="比較説明">比較説明</option>
+                <option value="用語説明">用語説明</option>
+                <option value="記述説明">記述説明</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:8px">
+            <label for="teacherStockQuestion">問題文</label>
+            <textarea id="teacherStockQuestion" maxlength="2000" placeholder="固定ストックとして登録する問題文を入力"></textarea>
+          </div>
+          <div style="margin-top:8px">
+            <label for="teacherStockModelAnswer">模範解答（任意）</label>
+            <textarea id="teacherStockModelAnswer" maxlength="2000" placeholder="採点安定化に使う模範解答"></textarea>
+          </div>
+          <div class="flex" style="margin-top:8px">
+            <button class="btn brand" id="btnTeacherStockAdd" type="button">固定ストック問題を追加</button>
+            <span class="small muted">※ 自動生成ではなく、講師が固定問題を管理するための追加フォームです。</span>
+          </div>
+          <div id="teacherStockAddStatus" class="small muted" style="margin-top:6px"></div>
+        </div>
+
+        <div class="qcard stock-manage" data-role="teacher" style="margin-top:12px">
+          <div class="small muted">追加済み固定ストック（直近10件）</div>
+          <div class="list" id="teacherStockList" style="max-height:260px;margin-top:8px"></div>
+        </div>
+
         <div class="qcard" style="margin-top:16px">
           <div class="flex" style="justify-content:space-between;align-items:center">
             <div>
@@ -270,7 +323,7 @@
       </section>
 
       <!-- 右：採点 -->
-      <section class="card" id="gradingSection">
+      <section class="card" id="gradingSection" data-role="both">
         <div class="toolbar">
           <h2>② 採点</h2>
           <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
@@ -850,7 +903,8 @@
     const ASSIST_TEMPLATE = '結論：＿＿＿＿。理由：＿＿＿＿。具体例：＿＿＿＿。まとめ：＿＿＿＿。';
 
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
-    const APP_MODE = 'teacher';
+    const APP_MODE_KEY = 'cyopa_app_mode_v1';
+    let APP_MODE = localStorage.getItem(APP_MODE_KEY) || 'teacher';
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
     const ANON_USER_ID_KEY = 'anonUserId';
@@ -889,6 +943,29 @@
 
     function isMobileLayout(){
       return window.matchMedia('(max-width: 700px)').matches;
+    }
+
+    if(!['teacher','student'].includes(APP_MODE)){
+      APP_MODE = 'teacher';
+    }
+
+    function applyRoleMode(mode){
+      APP_MODE = mode === 'student' ? 'student' : 'teacher';
+      localStorage.setItem(APP_MODE_KEY, APP_MODE);
+      document.body.setAttribute('data-app-mode', APP_MODE);
+      document.querySelectorAll('[data-role]').forEach(el=>{
+        const role = el.getAttribute('data-role');
+        const visible = role === 'both' || role === APP_MODE;
+        el.style.display = visible ? '' : 'none';
+      });
+      $('#btnRoleTeacher')?.classList.toggle('active', APP_MODE === 'teacher');
+      $('#btnRoleStudent')?.classList.toggle('active', APP_MODE === 'student');
+      const badge = $('#roleBadge');
+      if(badge){
+        badge.textContent = APP_MODE === 'teacher'
+          ? '講師向け管理・分析画面'
+          : '生徒向け解答画面';
+      }
     }
 
 
@@ -1513,6 +1590,82 @@
       }
     }
 
+    function setTeacherStockCategories(subjectVal){
+      const cat = $('#teacherStockCategory');
+      if(!cat) return;
+      cat.innerHTML = '';
+      const options = subjectVal === '理科'
+        ? ['生物','化学','地学','物理','天体']
+        : ['地理','歴史'];
+      options.forEach(x=>{
+        const o = document.createElement('option');
+        o.value = x;
+        o.textContent = x;
+        cat.appendChild(o);
+      });
+    }
+
+    function renderTeacherStockList(items){
+      const wrap = $('#teacherStockList');
+      if(!wrap) return;
+      wrap.innerHTML = '';
+      if(!items.length){
+        wrap.innerHTML = '<div class="small muted">固定ストック問題はまだありません。</div>';
+        return;
+      }
+      items.slice(0, 10).forEach(it=>{
+        const row = document.createElement('div');
+        row.className = 'item';
+        row.innerHTML = `
+          <div class="meta-row">
+            <span class="meta-chip">${escapeHtml(it.subject || '未設定')}</span>
+            <span class="meta-chip">${escapeHtml(it.category || it.domain || '未設定')}</span>
+            <span class="meta-chip">${escapeHtml(it.question_type || '記述説明')}</span>
+            ${it.unit ? `<span class="meta-chip">${escapeHtml(it.unit)}</span>` : ''}
+          </div>
+          <div>${escapeHtml((it.question || '').slice(0, 80))}${(it.question || '').length > 80 ? '…' : ''}</div>
+        `;
+        wrap.appendChild(row);
+      });
+    }
+
+    async function refreshTeacherStockList(){
+      try{
+        const r = await apiGet('/api/stock/list?limit=50');
+        renderTeacherStockList(Array.isArray(r.items) ? r.items : []);
+      }catch(e){
+        renderTeacherStockList([]);
+      }
+    }
+
+    async function addTeacherStock(){
+      const status = $('#teacherStockAddStatus');
+      const payload = {
+        subject: $('#teacherStockSubject')?.value || '社会',
+        category: $('#teacherStockCategory')?.value || '',
+        domain: $('#teacherStockCategory')?.value || '',
+        unit: ($('#teacherStockUnit')?.value || '').trim(),
+        question_type: $('#teacherStockType')?.value || '記述説明',
+        question: ($('#teacherStockQuestion')?.value || '').trim(),
+        model_answer: ($('#teacherStockModelAnswer')?.value || '').trim(),
+        difficulty: '10点'
+      };
+      if(!payload.question){
+        if(status) status.textContent = '問題文を入力してください。';
+        return;
+      }
+      try{
+        const r = await apiPost('/api/stock/add', payload);
+        const duplicate = r?.duplicate_of ? `（類似問題ID: ${r.duplicate_of}）` : '';
+        if(status) status.textContent = `固定ストックを登録しました ${duplicate}`;
+        $('#teacherStockQuestion').value = '';
+        await refreshTeacherStockList();
+        await refreshStockSummary();
+      }catch(e){
+        if(status) status.textContent = `追加に失敗しました: ${e.message}`;
+      }
+    }
+
     // ---- モーダル共通開閉（howtoと同方式） ----
     function openModal(modalId, focusTargetSelector){
       const m = document.getElementById(modalId);
@@ -1715,6 +1868,7 @@
     // ---- 初期化 ----
     async function boot(){
       ensureAnonUserId();
+      applyRoleMode(APP_MODE);
       loadSettings();
       const nickInput = $('#nicknameInput');
       if(nickInput){
@@ -1745,9 +1899,11 @@
 
       updateSubjectTabs();
       applyScienceConstraints();
+      setTeacherStockCategories($('#teacherStockSubject')?.value || '社会');
       $('#settingsCard').style.display = 'none';
       refreshUsage();
       refreshStockSummary();
+      refreshTeacherStockList();
       refreshTeacherDashboard();
     }
 
@@ -2767,6 +2923,8 @@
     $('#btnRefreshTeacherDashboard')?.addEventListener('click', refreshTeacherDashboard);
 
     $('#btnHowto')?.addEventListener('click', openHowto);
+    $('#btnRoleTeacher')?.addEventListener('click', ()=> applyRoleMode('teacher'));
+    $('#btnRoleStudent')?.addEventListener('click', ()=> applyRoleMode('student'));
     $('#btnJumpNeedsReview')?.addEventListener('click', jumpToNeedsReview);
     $('#btnJumpWeakness')?.addEventListener('click', jumpToWeakness);
     $('#btnToggleTopActions')?.addEventListener('click', ()=>{
@@ -2800,6 +2958,8 @@
     $('#stockSearch').addEventListener('keydown', (e)=>{
       if(e.key === 'Enter'){ refreshStockModal(); e.preventDefault(); }
     });
+    $('#teacherStockSubject').onchange = ()=> setTeacherStockCategories($('#teacherStockSubject').value);
+    $('#btnTeacherStockAdd').onclick = addTeacherStock;
 
     // ✅ フィードバックモーダル開閉
     $('#btnFeedback').onclick = openFeedback;
