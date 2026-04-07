@@ -3385,11 +3385,21 @@ def grade_answer():
         "ts": now_ms(),
     }
 
+    score_100 = int(round((score_total_scaled / max_score) * 100)) if max_score > 0 else 0
+    prev_score_100 = None
+    score_gain_100 = None
+    major_improvement = False
+    if prev_score_total is not None and max_score > 0:
+        prev_score_100 = int(round((prev_score_total / max_score) * 100))
+        score_gain_100 = score_100 - prev_score_100
+        major_improvement = score_gain_100 >= 15
+
     response_payload = {
         "ok": True,
         "score": score_total_scaled,
         "score_total": score_total_scaled,
         "score_total_raw": score_total_scaled,
+        "score_100": score_100,
         "commentary": commentary,
         "short_comment": short_comment,
         "good_points": good_points,
@@ -3405,6 +3415,9 @@ def grade_answer():
         "improvements": improvements,
         "rubric_diff": rubric_diff,
         "previous_score_total": prev_score_total,
+        "previous_score_100": prev_score_100,
+        "score_gain_100": score_gain_100,
+        "is_major_improvement": major_improvement,
         "model_answer": model_ans,
         "reasons": reasons,
         "full_score_example": full_score_example,
@@ -3427,6 +3440,12 @@ def grade_answer():
         "score_guide": score_guide,
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
+    encouragement_message = ""
+    if response_payload.get("is_perfect_score"):
+        encouragement_message = "満点達成！この調子で次の問題にも挑戦しよう。"
+    elif response_payload.get("is_major_improvement"):
+        encouragement_message = "前回より大きく伸びました。書き直しの効果が出ています！"
+    response_payload["encouragement_message"] = encouragement_message
 
     if response_payload.get("is_perfect_score"):
         head = response_payload.get("praise_headline") or "🎉満点おめでとう！"
