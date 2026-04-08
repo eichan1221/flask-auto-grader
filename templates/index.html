@@ -445,6 +445,12 @@
           </div>
         </div>
 
+        <div class="qcard mini" id="studentInsightCard" data-role="student" style="margin-top:12px">
+          <div class="small muted">学習のヒント（軽い弱点傾向）</div>
+          <div class="small muted" id="studentInsightMeta">提出が3件以上たまると表示されます。</div>
+          <ul id="studentInsightList" style="margin-top:8px"></ul>
+        </div>
+
         <div class="qcard" id="answerComparisonCard" style="margin-top:12px;display:none">
           <div class="toolbar">
             <div class="small muted">答案比較（初回MVP）</div>
@@ -1415,6 +1421,7 @@
       try{
         const r = await apiGet(`/api/teacher/student/${encodeURIComponent(userKey)}`);
         const items = Array.isArray(r?.items) ? r.items : [];
+        const analysis = r?.analysis || {};
         if(!items.length){
           wrap.innerHTML = '<div class="small muted">この生徒の履歴はまだありません。</div>';
           return;
@@ -1438,9 +1445,60 @@
           `;
           wrap.appendChild(div);
         });
+        const unitHint = Array.isArray(analysis.by_unit) && analysis.by_unit[0] ? analysis.by_unit[0] : null;
+        const typeHint = Array.isArray(analysis.by_question_type) && analysis.by_question_type[0] ? analysis.by_question_type[0] : null;
+        const trend = document.createElement('div');
+        trend.className = 'item';
+        trend.innerHTML = `
+          <div><b>軽い傾向メモ（講師向け）</b></div>
+          <div class="small">単元: ${escapeHtml(unitHint ? `${unitHint.unit}（平均${unitHint.avg_score_100}点 / リライト${unitHint.avg_rewrite_count}回）` : 'データ不足')}</div>
+          <div class="small">問題タイプ: ${escapeHtml(typeHint ? `${typeHint.question_type}（平均${typeHint.avg_score_100}点）` : 'データ不足')}</div>
+        `;
+        wrap.appendChild(trend);
       }catch(e){
         wrap.innerHTML = '<div class="small muted">履歴の取得に失敗しました。</div>';
       }
+    }
+
+    function renderStudentInsights(insights){
+      const list = $('#studentInsightList');
+      const meta = $('#studentInsightMeta');
+      if(!list || !meta) return;
+      list.innerHTML = '';
+      const recordCount = Number(insights?.record_count || 0);
+      const minRequired = Number(insights?.min_required || 3);
+      const messages = Array.isArray(insights?.messages) ? insights.messages : [];
+      meta.textContent = `提出データ: ${recordCount}件`;
+      if(recordCount < minRequired){
+        const li = document.createElement('li');
+        li.className = 'small muted';
+        li.textContent = `あと${Math.max(minRequired - recordCount, 0)}件で傾向表示が増えます。`;
+        list.appendChild(li);
+        return;
+      }
+      if(!messages.length){
+        const li = document.createElement('li');
+        li.className = 'small muted';
+        li.textContent = '傾向はまだ判定できませんでした。';
+        list.appendChild(li);
+        return;
+      }
+      messages.forEach(msg=>{
+        const li = document.createElement('li');
+        li.textContent = msg;
+        list.appendChild(li);
+      });
+    }
+
+    async function refreshStudentInsights(){
+      try{
+        const r = await apiGet('/api/student/insights');
+        if(r?.ok){
+          renderStudentInsights(r.insights || {});
+          return;
+        }
+      }catch(e){}
+      renderStudentInsights({record_count: 0, min_required: 3, messages: []});
     }
 
     function renderTeacherDashboard(data){
@@ -1923,6 +1981,7 @@
       refreshStockSummary();
       refreshTeacherStockList();
       refreshTeacherDashboard();
+      refreshStudentInsights();
     }
 
     // ---- 生成UIロジック ----
@@ -2810,6 +2869,7 @@
         updateAssistStatus();
         await refreshUsage();
         await refreshTeacherDashboard();
+        await refreshStudentInsights();
         hideErrorBanner();
         lastRecoverAction = null;
         toast('採点しました');
