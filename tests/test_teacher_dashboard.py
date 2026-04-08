@@ -70,6 +70,27 @@ class TeacherDashboardTests(unittest.TestCase):
         self.assertEqual(body["student"]["student_label"], "B")
         self.assertEqual(body["items"][0]["first_score"], 3)
         self.assertEqual(body["items"][0]["latest_score"], 8)
+        self.assertIn("analysis", body)
+        self.assertGreaterEqual(body["analysis"]["record_count"], 1)
+
+    def test_teacher_analysis_base_endpoint_returns_aggregates(self):
+        self._append({
+            "event": "graded", "user_key": "u3", "student_label": "C", "question_key": "q10",
+            "subject": "社会", "category": "歴史", "unit": "江戸幕府",
+            "question_type": "理由説明", "score": 5, "max_points": 10, "rewrite_count": 1, "ts": 21,
+        })
+        self._append({
+            "event": "graded", "user_key": "u3", "student_label": "C", "question_key": "q11",
+            "subject": "社会", "category": "歴史", "unit": "江戸幕府",
+            "question_type": "比較説明", "score": 8, "max_points": 10, "rewrite_count": 0, "ts": 22,
+        })
+
+        res = self.client.get("/api/teacher/analysis_base?user_key=u3")
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertTrue(body["ok"])
+        self.assertGreaterEqual(len(body["analysis"]["records"]), 2)
+        self.assertEqual(body["analysis"]["by_unit"][0]["unit"], "江戸幕府")
 
 
 class DailyLimitBypassTests(unittest.TestCase):
