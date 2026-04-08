@@ -2172,6 +2172,52 @@ def build_learning_analysis_base(limit: int = 700, user_key: Optional[str] = Non
         "by_category": _aggregate_learning_rows(records, "category"),
     }
 
+
+def build_light_student_insights(user_key: str, limit: int = 700) -> Dict[str, Any]:
+    analysis = build_learning_analysis_base(limit=limit, user_key=user_key)
+    records = analysis.get("records", [])
+    record_count = len(records)
+    if record_count < 3:
+        return {
+            "record_count": record_count,
+            "min_required": 3,
+            "messages": [],
+            "highlights": {"subject_category": None, "unit_retry": None, "question_type": None, "stable_area": None},
+        }
+
+    by_category = analysis.get("by_category", [])
+    by_unit = analysis.get("by_unit", [])
+    by_question_type = analysis.get("by_question_type", [])
+
+    risky_category = next((x for x in by_category if int(x.get("count", 0)) >= 2 and (x.get("low_score_rate", 0) >= 0.5 or int(x.get("avg_score_100", 100)) <= 60)), None)
+    retry_heavy_unit = next((x for x in by_unit if int(x.get("count", 0)) >= 2 and float(x.get("avg_rewrite_count", 0)) >= 1.0), None)
+    tough_qtype = next((x for x in by_question_type if int(x.get("count", 0)) >= 2 and int(x.get("avg_score_100", 100)) <= 65), None)
+    stable_area = next((x for x in by_category if int(x.get("count", 0)) >= 2 and int(x.get("avg_score_100", 0)) >= 75 and float(x.get("avg_rewrite_count", 99)) <= 0.6), None)
+
+    messages: List[str] = []
+    if risky_category:
+        messages.append(f"{risky_category.get('category', '未設定')}分野は、いまは失点がやや出やすいです。理由→具体例の順で1文ずつ足すと安定しやすくなります。")
+    if retry_heavy_unit:
+        messages.append(f"{retry_heavy_unit.get('unit', '未設定')}はリトライが多めです。先に使う用語を2〜3個メモしてから書くと、書き直しが減りやすいです。")
+    if tough_qtype:
+        messages.append(f"{tough_qtype.get('question_type', '記述説明')}タイプは点数が伸びにくい傾向です。結論→理由→具体例の3点セットを意識してみましょう。")
+    if stable_area:
+        messages.append(f"{stable_area.get('category', '未設定')}分野は比較的安定しています。今の書き方を他の単元にも横展開してみましょう。")
+    if not messages:
+        messages.append("大きな偏りはまだ小さめです。引き続き同じペースで解いて、傾向を見ていきましょう。")
+
+    return {
+        "record_count": record_count,
+        "min_required": 3,
+        "messages": messages[:4],
+        "highlights": {
+            "subject_category": risky_category,
+            "unit_retry": retry_heavy_unit,
+            "question_type": tough_qtype,
+            "stable_area": stable_area,
+        },
+    }
+
 # =========================
 # ルート（UI）
 # =========================
@@ -2273,6 +2319,13 @@ def api_teacher_analysis_base():
             "metrics": ["score", "score_100", "rewrite_count", "attempt_count"],
         },
     }), 200
+
+
+@app.get("/api/student/insights")
+def api_student_insights():
+    user_key = _get_user_key()
+    insights = build_light_student_insights(user_key=user_key, limit=700)
+    return jsonify({"ok": True, "insights": insights}), 200
 
 # =========================
 # エラーハンドラ

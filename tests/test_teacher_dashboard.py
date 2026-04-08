@@ -92,6 +92,30 @@ class TeacherDashboardTests(unittest.TestCase):
         self.assertGreaterEqual(len(body["analysis"]["records"]), 2)
         self.assertEqual(body["analysis"]["by_unit"][0]["unit"], "江戸幕府")
 
+    def test_student_insights_endpoint_returns_light_messages(self):
+        self._append({
+            "event": "graded", "user_key": "u4", "student_label": "D", "question_key": "q20",
+            "subject": "理科", "category": "化学", "unit": "中和", "question_type": "理由説明",
+            "score": 4, "max_points": 10, "rewrite_count": 2, "ts": 31,
+        })
+        self._append({
+            "event": "graded", "user_key": "u4", "student_label": "D", "question_key": "q21",
+            "subject": "理科", "category": "化学", "unit": "中和", "question_type": "理由説明",
+            "score": 5, "max_points": 10, "rewrite_count": 1, "ts": 32,
+        })
+        self._append({
+            "event": "graded", "user_key": "u4", "student_label": "D", "question_key": "q22",
+            "subject": "社会", "category": "歴史", "unit": "江戸幕府", "question_type": "比較説明",
+            "score": 8, "max_points": 10, "rewrite_count": 0, "ts": 33,
+        })
+
+        res = self.client.get("/api/student/insights", headers={"X-User-Id": "u4"})
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertTrue(body["ok"])
+        self.assertGreaterEqual(body["insights"]["record_count"], 3)
+        self.assertGreaterEqual(len(body["insights"]["messages"]), 1)
+
 
 class DailyLimitBypassTests(unittest.TestCase):
     def setUp(self):
