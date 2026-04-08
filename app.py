@@ -234,6 +234,14 @@ def _normalize_log_categories(cats: Any) -> List[str]:
             out.append(nc)
     return out
 
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
 def infer_question_type_label(question: str, tags: Optional[List[str]] = None) -> str:
     q = normalize_text(question)
     tags_text = " ".join([normalize_text(t) for t in (tags or [])])
@@ -2080,6 +2088,90 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
         "weakness_window": TEACHER_WEAKNESS_WINDOW,
     }
 
+
+def _aggregate_learning_rows(rows: List[Dict[str, Any]], key_name: str) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        key = normalize_text(row.get(key_name, "")) or "未設定"
+        bucket = buckets.setdefault(key, {
+            key_name: key,
+            "count": 0,
+            "score_100_sum": 0,
+            "rewrite_sum": 0,
+            "low_score_count": 0,
+        })
+        score_100 = _safe_int(row.get("score_100", 0), 0)
+        rewrite_count = _safe_int(row.get("rewrite_count", 0), 0)
+        bucket["count"] += 1
+        bucket["score_100_sum"] += score_100
+        bucket["rewrite_sum"] += rewrite_count
+        if score_100 < 60:
+            bucket["low_score_count"] += 1
+
+    summary: List[Dict[str, Any]] = []
+    for _, b in buckets.items():
+        count = max(1, b["count"])
+        summary.append({
+            key_name: b[key_name],
+            "count": b["count"],
+            "avg_score_100": int(round(b["score_100_sum"] / count)),
+            "avg_rewrite_count": round(b["rewrite_sum"] / count, 2),
+            "low_score_rate": round(b["low_score_count"] / count, 2),
+        })
+    summary.sort(key=lambda x: (x["avg_score_100"], -x["count"]))
+    return summary
+
+
+def build_learning_analysis_base(limit: int = 700, user_key: Optional[str] = None) -> Dict[str, Any]:
+    logs = _load_grading_events(limit=limit)
+    if user_key:
+        target = normalize_text(user_key)
+        logs = [rec for rec in logs if normalize_text(rec.get("user_key", "")) == target]
+
+    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    student_labels: Dict[str, str] = {}
+    for rec in logs:
+        ukey = normalize_text(rec.get("user_key", "")) or "anonymous"
+        qkey = normalize_text(rec.get("question_key", "")) or ""
+        grouped.setdefault((ukey, qkey), []).append(rec)
+        label = normalize_text(rec.get("student_label", ""))
+        if label:
+            student_labels[ukey] = label
+
+    records: List[Dict[str, Any]] = []
+    for (ukey, qkey), rows in grouped.items():
+        rows.sort(key=lambda x: int(x.get("ts", 0) or 0))
+        latest = rows[-1]
+        max_points = max(1, _safe_int(latest.get("max_points", 10), 10))
+        score = _safe_int(latest.get("score", 0), 0)
+        score_100 = _safe_int(latest.get("score_100", int(round(score * 100 / max_points))), 0)
+        rewrite_count = max(_safe_int(latest.get("rewrite_count", 0), 0), len(rows) - 1)
+        records.append({
+            "user_key": ukey,
+            "student_label": student_labels.get(ukey, ukey),
+            "question_key": qkey,
+            "question_preview": latest.get("question_preview", "（問題テキスト非表示）"),
+            "subject": normalize_text(latest.get("subject", "")) or "未設定",
+            "category": normalize_text(latest.get("category", "")) or "未設定",
+            "unit": normalize_text(latest.get("unit", "")) or "未設定",
+            "question_type": normalize_text(latest.get("question_type", "")) or "記述説明",
+            "score": score,
+            "max_points": max_points,
+            "score_100": max(0, min(100, score_100)),
+            "rewrite_count": rewrite_count,
+            "attempt_count": len(rows),
+            "latest_request_id": latest.get("request_id", ""),
+            "ts": _safe_int(latest.get("ts", 0), 0),
+        })
+
+    records.sort(key=lambda x: x.get("ts", 0), reverse=True)
+    return {
+        "records": records,
+        "by_unit": _aggregate_learning_rows(records, "unit"),
+        "by_question_type": _aggregate_learning_rows(records, "question_type"),
+        "by_category": _aggregate_learning_rows(records, "category"),
+    }
+
 # =========================
 # ルート（UI）
 # =========================
@@ -2148,7 +2240,39 @@ def api_teacher_student(user_key: str):
         })
 
     items.sort(key=lambda x: x.get("ts", 0), reverse=True)
-    return jsonify({"ok": True, "student": {"user_key": target, "student_label": label}, "items": items[:20]}), 200
+    analysis = build_learning_analysis_base(limit=700, user_key=target)
+    return jsonify({
+        "ok": True,
+        "student": {"user_key": target, "student_label": label},
+        "items": items[:20],
+        "analysis": {
+            "by_unit": analysis.get("by_unit", []),
+            "by_question_type": analysis.get("by_question_type", []),
+            "by_category": analysis.get("by_category", []),
+            "record_count": len(analysis.get("records", [])),
+        },
+    }), 200
+
+
+@app.get("/api/teacher/analysis_base")
+def api_teacher_analysis_base():
+    if ACCESS_CODE and not _is_teacher_request():
+        return jsonify({
+            "ok": False,
+            "error": "teacher_access_required",
+            "message": "分析データの取得にはACCESS_CODE認証が必要です。設定からACCESS_CODEを入力してください。",
+        }), 403
+    user_key = normalize_text(request.args.get("user_key", "")) or None
+    analysis = build_learning_analysis_base(limit=1000, user_key=user_key)
+    return jsonify({
+        "ok": True,
+        "analysis": analysis,
+        "meta": {
+            "description": "弱点分析UI前段の集計用ベースデータです。",
+            "dimensions": ["subject", "category", "unit", "question_type", "question_key"],
+            "metrics": ["score", "score_100", "rewrite_count", "attempt_count"],
+        },
+    }), 200
 
 # =========================
 # エラーハンドラ
@@ -3294,12 +3418,16 @@ def grade_answer():
         prev_low = int(recent_same_question[-1].get("consecutive_low_scores", 0) or 0)
         consecutive_low_scores = prev_low + 1 if prev_low > 0 else 1
 
+    attempt_count_same_question = len(recent_same_question) + 1
+    rewrite_count_derived = max(int(data.get("rewrite_count", 0) or 0), attempt_count_same_question - 1)
+
     ai_review_flag = bool(
         answer_length < 20
         or score_total_scaled <= max(2, int(max_score * 0.4))
         or consecutive_low_scores >= 3
         or same_cat_streak >= 2
     )
+    score_100 = int(round((score_total_scaled / max_score) * 100)) if max_score > 0 else 0
 
     graded_log = {
         "event": "graded",
@@ -3313,11 +3441,14 @@ def grade_answer():
         "unit": stock_unit,
         "score": score_total_scaled,
         "max_points": max_score,
+        "score_100": score_100,
         "score_raw": score_total_raw,
         "score_normalize_reason": normalize_reason,
         "perfect_probability": prob,
         "assist_on": data.get("assist_on", False),
         "rewrite_count": data.get("rewrite_count", 0),
+        "rewrite_count_derived": rewrite_count_derived,
+        "attempt_count_same_question": attempt_count_same_question,
         "selected_full_score": data.get("selected_full_score", data["difficulty"]),
         "last10_scores": data.get("last10_scores", []),
         "answer_length": answer_length,
@@ -3385,7 +3516,6 @@ def grade_answer():
         "ts": now_ms(),
     }
 
-    score_100 = int(round((score_total_scaled / max_score) * 100)) if max_score > 0 else 0
     prev_score_100 = None
     score_gain_100 = None
     major_improvement = False
@@ -3438,6 +3568,15 @@ def grade_answer():
         "coaching_cards": build_coaching_cards(rubric, data["student_answer"]),
         "rewrite_checkpoints": rewrite_checkpoints,
         "score_guide": score_guide,
+        "analysis_context": {
+            "subject": stock_subject or "未設定",
+            "category": stock_category or "未設定",
+            "unit": stock_unit or "未設定",
+            "question_type": q_type,
+            "question_key": qkey,
+            "score_100": score_100,
+            "rewrite_count": rewrite_count_derived,
+        },
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
     encouragement_message = ""
