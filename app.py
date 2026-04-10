@@ -1499,6 +1499,67 @@ def build_coaching_cards(rubric: Dict[str, int], answer: str) -> List[Dict[str, 
         })
     return cards[:3]
 
+
+def build_student_learning_feedback(response: Dict[str, Any]) -> Dict[str, List[str]]:
+    """生徒画面向けに、弱点・不足点・記述のポイントを学習導線として整理する。"""
+    is_perfect = bool(response.get("is_perfect_score"))
+    if is_perfect:
+        return {
+            "weakness_points": [],
+            "missing_points": [],
+            "writing_points": [],
+            "rewrite_prompt": "満点到達です。次の問題でも同じ型で書いてみましょう。",
+        }
+
+    rubric = response.get("rubric", {}) if isinstance(response.get("rubric", {}), dict) else {}
+    weak_categories = response.get("weakness_categories", []) if isinstance(response.get("weakness_categories", []), list) else []
+    weak_tags = response.get("weak_tags", []) if isinstance(response.get("weak_tags", []), list) else []
+
+    weakness_points: List[str] = []
+    for c in weak_categories[:3]:
+        weakness_points.append(f"{normalize_text(str(c))}が弱めです。")
+
+    if int(rubric.get("conclusion", 0) or 0) <= 1:
+        weakness_points.append("最初の一文で結論を言い切ると伝わりやすくなります。")
+    if int(rubric.get("logic", 0) or 0) <= 1:
+        weakness_points.append("理由のつながりが弱いので、原因→結果の順で書きましょう。")
+    if int(rubric.get("wording", 0) or 0) <= 1:
+        weakness_points.append("重要語句をもう1つ入れると答案の精度が上がります。")
+
+    missing_points: List[str] = []
+    next_step = normalize_text(response.get("next_step", ""))
+    rewrite_tip = normalize_text(response.get("rewrite_tip", ""))
+    if next_step:
+        missing_points.append(f"今回足りなかった点: {normalize_guidance_tone(next_step, next_step)}")
+    if rewrite_tip:
+        missing_points.append(f"追記すると良い点: {normalize_guidance_tone(rewrite_tip, rewrite_tip)}")
+    for t in weak_tags[:2]:
+        missing_points.append(f"不足しやすい観点: {normalize_text(str(t))}")
+
+    writing_points: List[str] = [
+        "書き方の型は『結論→理由→具体例』の順にする",
+        "一文目で答えを示してから理由を書く",
+        "重要語句を1つ入れて30〜80字を目安にまとめる",
+    ]
+
+    def _dedupe(items: List[str], limit: int) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for raw in items:
+            t = normalize_text(raw)
+            if not t or t in seen:
+                continue
+            seen.add(t)
+            out.append(t)
+        return out[:limit]
+
+    return {
+        "weakness_points": _dedupe(weakness_points, 3),
+        "missing_points": _dedupe(missing_points, 3),
+        "writing_points": _dedupe(writing_points, 3),
+        "rewrite_prompt": "上の3点を直して、そのまま書き直し→再提出してみよう。",
+    }
+
 def check_openai_connectivity(force: bool = False) -> Tuple[Optional[bool], str, int]:
     """OpenAIとの疎通を軽く確認（5分キャッシュ／対象モデルのみ）"""
     ttl_sec = 300
@@ -3632,6 +3693,7 @@ def grade_answer():
         },
     }
     response_payload = normalize_full_score_feedback(response_payload, max_score)
+    response_payload.update(build_student_learning_feedback(response_payload))
     encouragement_message = ""
     if response_payload.get("is_perfect_score"):
         encouragement_message = "満点達成！この調子で次の問題にも挑戦しよう。"
