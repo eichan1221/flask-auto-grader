@@ -178,18 +178,21 @@
             <div>
               <label for="studentSubject">1. 教科を選ぶ</label>
               <select id="studentSubject">
+                <option value="">選択してください</option>
                 <option value="社会">社会</option>
                 <option value="理科">理科</option>
               </select>
             </div>
             <div>
               <label for="studentCategory">2. 単元分類を選ぶ</label>
-              <select id="studentCategory"></select>
+              <select id="studentCategory" disabled>
+                <option value="">先に教科を選択してください</option>
+              </select>
             </div>
             <div>
               <label for="studentUnit">3. 単元を選ぶ</label>
-              <select id="studentUnit">
-                <option value="">すべての単元</option>
+              <select id="studentUnit" disabled>
+                <option value="">先に単元分類を選択してください</option>
               </select>
             </div>
           </div>
@@ -1401,6 +1404,27 @@
 
     // ---- UI状態 ----
     let subject = '社会';
+    const FALLBACK_SUBJECT_MASTERS = {
+      categories: {
+        '社会': ['地理', '歴史', '公民'],
+        '理科': ['生物', '化学', '地学', '物理', '天体'],
+      },
+      units: {
+        '社会': {
+          '地理': ['世界と日本の地域構成','世界各地の人々の生活と環境','世界の諸地域（アジア州）','世界の諸地域（ヨーロッパ州）','世界の諸地域（アフリカ州）','世界の諸地域（北アメリカ州）','世界の諸地域（南アメリカ州）','世界の諸地域（オセアニア州）','地域調査の手法','日本の地域的特色と地域区分','日本の諸地域（北海道地方）','日本の諸地域（東北地方）','日本の諸地域（関東地方）','日本の諸地域（中部地方）','日本の諸地域（近畿地方）','日本の諸地域（中国・四国地方）','日本の諸地域（九州地方）','地域の在り方'],
+          '歴史': ['歴史との対話','身近な地域の歴史','古代までの日本','中世の日本','近世の日本','近代の日本と世界','現代の日本と世界'],
+          '公民': ['私たちが生きる現代社会と文化の特色','現代社会を捉える枠組み','市場の働きと経済','国民の生活と政府の役割','人間の尊重と日本国憲法の基本的原則','民主政治と政治参加','世界平和と人類の福祉の増大','よりよい社会を目指して'],
+        },
+        '理科': {
+          '物理': ['身近な物理現象','電流とその利用','運動とエネルギー','科学技術と人間'],
+          '化学': ['身の回りの物質','化学変化と原子・分子','化学変化とイオン'],
+          '生物': ['いろいろな生物とその共通点','生物の体のつくりと働き','生命の連続性','自然と人間'],
+          '地学': ['大地の成り立ちと変化','気象とその変化','地球と宇宙'],
+          '天体': ['地球と宇宙'],
+        },
+      }
+    };
+    let subjectMasters = JSON.parse(JSON.stringify(FALLBACK_SUBJECT_MASTERS));
     let currentItem = null;
     let generatedRaw = null;
     let lastGradeResult = null;
@@ -1461,9 +1485,7 @@
     function setStockCategories(subjectVal){
       const cat = $('#stockCategory');
       cat.innerHTML = '';
-      const options = subjectVal === '社会'
-        ? ['地理','歴史']
-        : ['生物','化学','地学','物理','天体'];
+      const options = subjectMasters?.categories?.[subjectVal] || [];
       options.forEach(x=>{
         const o = document.createElement('option');
         o.textContent = x;
@@ -1473,19 +1495,50 @@
       applyStockScienceConstraints();
     }
 
+    function resetStudentSolveState(){
+      currentItem = null;
+      generatedRaw = null;
+      lastGradeResult = null;
+      lastGradedAnswer = '';
+      lastGradeQuestion = '';
+      firstSubmittedAnswer = '';
+      rewriteCount = 0;
+      const answer = $('#studentAnswer');
+      if(answer) answer.value = '';
+      const qText = $('#currentQuestionText');
+      if(qText) qText.textContent = '';
+      renderHintLikeText($('#currentExpl'), '');
+      renderHintLikeText($('#currentIntn'), '');
+      clearGradeResultUI();
+      updateCharCount();
+    }
+
     function setStudentCategories(subjectVal){
       const cat = $('#studentCategory');
+      const unit = $('#studentUnit');
       if(!cat) return;
       cat.innerHTML = '';
-      const options = subjectVal === '社会'
-        ? ['地理','歴史']
-        : ['生物','化学','地学','物理','天体'];
+      if(!subjectVal){
+        cat.disabled = true;
+        cat.innerHTML = '<option value="">先に教科を選択してください</option>';
+        if(unit){
+          unit.disabled = true;
+          unit.innerHTML = '<option value="">先に単元分類を選択してください</option>';
+        }
+        return;
+      }
+      const options = subjectMasters?.categories?.[subjectVal] || [];
+      cat.disabled = false;
       options.forEach(x=>{
         const o = document.createElement('option');
         o.value = x;
         o.textContent = x;
         cat.appendChild(o);
       });
+      if(unit){
+        unit.disabled = true;
+        unit.innerHTML = '<option value="">先に単元分類を選択してください</option>';
+      }
     }
 
     function applyStudentSelectionToMain(subjectVal, categoryVal){
@@ -1497,6 +1550,20 @@
         $('#category').value = categoryVal;
       }
       applyScienceConstraints();
+    }
+
+    function handleStudentSubjectChange(subjectVal){
+      setStudentCategories(subjectVal);
+      const categoryEl = $('#studentCategory');
+      const unitEl = $('#studentUnit');
+      if(categoryEl){
+        categoryEl.selectedIndex = 0;
+      }
+      if(unitEl){
+        unitEl.disabled = true;
+        unitEl.innerHTML = '<option value="">先に単元分類を選択してください</option>';
+      }
+      resetStudentSolveState();
     }
 
     // ---- 利用状況バッジ ----
@@ -1520,6 +1587,20 @@
         mainBadge.classList.toggle('limit-reached', mainRem <= 0);
         aiBadge.classList.toggle('limit-reached', aiRem <= 0);
       }catch(e){}
+    }
+
+    async function loadSubjectMasters(){
+      try{
+        const r = await apiGet('/api/masters');
+        if(r?.ok && r.categories && r.units){
+          subjectMasters = {
+            categories: r.categories,
+            units: r.units,
+          };
+          return;
+        }
+      }catch(e){}
+      subjectMasters = JSON.parse(JSON.stringify(FALLBACK_SUBJECT_MASTERS));
     }
 
     async function openStudentDrilldown(userKey){
@@ -1832,35 +1913,70 @@
       const subjectEl = $('#studentSubject');
       const categoryEl = $('#studentCategory');
       const unitEl = $('#studentUnit');
+      const guide = $('#studentQuestionGuide');
       if(!subjectEl || !categoryEl || !unitEl) return;
-      const subjectVal = subjectEl.value || '社会';
+      const subjectVal = subjectEl.value || '';
       const categoryVal = categoryEl.value || '';
-      const unitVal = unitEl.value || '';
+      if(!subjectVal){
+        categoryEl.disabled = true;
+        categoryEl.innerHTML = '<option value="">先に教科を選択してください</option>';
+        unitEl.disabled = true;
+        unitEl.innerHTML = '<option value="">先に単元分類を選択してください</option>';
+        renderStudentStockList([]);
+        if(guide) guide.textContent = '1. 教科を選ぶと、次に単元分類を選べます。';
+        return;
+      }
       applyStudentSelectionToMain(subjectVal, categoryVal);
+      if(!categoryVal){
+        const categories = subjectMasters?.categories?.[subjectVal] || [];
+        categoryEl.disabled = false;
+        categoryEl.innerHTML = '';
+        categories.forEach(c=>{
+          const op = document.createElement('option');
+          op.value = c;
+          op.textContent = c;
+          categoryEl.appendChild(op);
+        });
+      }
+      const selectedCategory = categoryEl.value || '';
+      if(!selectedCategory){
+        unitEl.disabled = true;
+        unitEl.innerHTML = '<option value="">先に単元分類を選択してください</option>';
+        renderStudentStockList([]);
+        if(guide) guide.textContent = '2. 単元分類を選ぶと、3. 単元を選べます。';
+        return;
+      }
+      const masterUnits = subjectMasters?.units?.[subjectVal]?.[selectedCategory] || [];
+      const keep = unitEl.value;
+      unitEl.disabled = false;
+      unitEl.innerHTML = '<option value="">単元を選択してください</option>';
+      masterUnits.forEach(u=>{
+        const op = document.createElement('option');
+        op.value = u;
+        op.textContent = u;
+        unitEl.appendChild(op);
+      });
+      if(keep && masterUnits.includes(keep)) unitEl.value = keep;
+      if(!unitEl.value){
+        renderStudentStockList([]);
+        if(guide) guide.textContent = '3. 単元を選ぶと、該当する問題一覧が表示されます。';
+        return;
+      }
       try{
         const qs = buildQueryString({
           limit: 200,
           order: 'new',
           subject: subjectVal,
-          category: categoryVal,
-          domain: categoryVal,
-          unit: unitVal,
+          category: selectedCategory,
+          domain: selectedCategory,
+          unit: unitEl.value,
           difficulty: '10点',
           max_points: 10,
         });
         const r = await apiGet('/api/stock/list' + qs);
         const items = Array.isArray(r.items) ? r.items : [];
-        const units = [...new Set(items.map(x=>(x.unit || '').trim()).filter(Boolean))];
-        const keep = unitEl.value;
-        unitEl.innerHTML = '<option value="">すべての単元</option>';
-        units.forEach(u=>{
-          const op = document.createElement('option');
-          op.value = u;
-          op.textContent = u;
-          unitEl.appendChild(op);
-        });
-        if(keep && units.includes(keep)) unitEl.value = keep;
         renderStudentStockList(items);
+        if(guide) guide.textContent = '4. 解きたい問題を選んで「この問題を解く」を押してください。';
       }catch(e){
         const wrap = $('#studentQuestionList');
         if(wrap){
@@ -1873,9 +1989,7 @@
       const cat = $('#teacherStockCategory');
       if(!cat) return;
       cat.innerHTML = '';
-      const options = subjectVal === '理科'
-        ? ['生物','化学','地学','物理','天体']
-        : ['地理','歴史'];
+      const options = subjectMasters?.categories?.[subjectVal] || [];
       options.forEach(x=>{
         const o = document.createElement('option');
         o.value = x;
@@ -2149,6 +2263,7 @@
       ensureAnonUserId();
       applyRoleMode(APP_MODE);
       loadSettings();
+      await loadSubjectMasters();
       const nickInput = $('#nicknameInput');
       if(nickInput){
         nickInput.value = localStorage.getItem(NICKNAME_KEY) || '';
@@ -2180,12 +2295,9 @@
       applyScienceConstraints();
       const studentSubject = $('#studentSubject');
       if(studentSubject){
-        studentSubject.value = subject;
+        studentSubject.value = '';
       }
-      setStudentCategories(subject);
-      if($('#studentCategory')){
-        $('#studentCategory').value = $('#category')?.value || $('#studentCategory').value;
-      }
+      setStudentCategories('');
       setTeacherStockCategories($('#teacherStockSubject')?.value || '社会');
       $('#settingsCard').style.display = 'none';
       refreshUsage();
@@ -2204,7 +2316,7 @@
       const cat = $('#category');
       cat.innerHTML = '';
       if(subject==='社会'){
-        ['地理','歴史'].forEach(x=>{
+        ['地理','歴史','公民'].forEach(x=>{
           const o=document.createElement('option'); o.textContent=x; cat.appendChild(o);
         });
         $('#gradeBox').style.display='none';
@@ -2429,6 +2541,30 @@
       if(it.subject && it.subject !== subject){
         subject = it.subject;
         updateSubjectTabs();
+      }
+      const studentSubject = $('#studentSubject');
+      if(studentSubject && it.subject){
+        studentSubject.value = it.subject;
+        setStudentCategories(it.subject);
+      }
+      const studentCategory = $('#studentCategory');
+      if(studentCategory && (it.domain || it.category)){
+        studentCategory.value = it.domain || it.category;
+      }
+      const studentUnit = $('#studentUnit');
+      if(studentUnit && it.subject && (it.domain || it.category)){
+        const units = subjectMasters?.units?.[it.subject]?.[it.domain || it.category] || [];
+        studentUnit.disabled = false;
+        studentUnit.innerHTML = '<option value="">単元を選択してください</option>';
+        units.forEach(u=>{
+          const op = document.createElement('option');
+          op.value = u;
+          op.textContent = u;
+          studentUnit.appendChild(op);
+        });
+        if(it.unit && units.includes(it.unit)){
+          studentUnit.value = it.unit;
+        }
       }
       if(it.domain || it.category){
         $('#category').value = it.domain || it.category;
@@ -3141,6 +3277,12 @@
       if(e.target.closest('.tab')){
         subject = e.target.closest('.tab').dataset.subject;
         updateSubjectTabs();
+        const studentSubject = $('#studentSubject');
+        if(studentSubject){
+          studentSubject.value = subject;
+          handleStudentSubjectChange(subject);
+          refreshStudentQuestionFlow();
+        }
       }
     });
     document.addEventListener('keydown', (e)=>{
@@ -3290,12 +3432,18 @@
       if(e.key === 'Enter'){ refreshStockModal(); e.preventDefault(); }
     });
     $('#studentSubject')?.addEventListener('change', ()=>{
-      const subjectVal = $('#studentSubject')?.value || '社会';
-      setStudentCategories(subjectVal);
+      const subjectVal = $('#studentSubject')?.value || '';
+      handleStudentSubjectChange(subjectVal);
       refreshStudentQuestionFlow();
     });
-    $('#studentCategory')?.addEventListener('change', refreshStudentQuestionFlow);
-    $('#studentUnit')?.addEventListener('change', refreshStudentQuestionFlow);
+    $('#studentCategory')?.addEventListener('change', ()=>{
+      resetStudentSolveState();
+      refreshStudentQuestionFlow();
+    });
+    $('#studentUnit')?.addEventListener('change', ()=>{
+      resetStudentSolveState();
+      refreshStudentQuestionFlow();
+    });
     $('#teacherStockSubject').onchange = ()=> setTeacherStockCategories($('#teacherStockSubject').value);
     $('#btnTeacherStockAdd').onclick = addTeacherStock;
 
