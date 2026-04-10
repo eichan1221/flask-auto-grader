@@ -222,6 +222,13 @@ textarea{min-height:120px;resize:vertical}
   grid-template-columns:1fr;
 }
 
+body[data-app-mode="student"] #teacherHero,
+body[data-app-mode="student"] #teacherDashboard,
+body[data-app-mode="student"] .teacher-primary-nav,
+body[data-app-mode="student"] #quickStartCard{
+  display:none !important;
+}
+
 .callout{
   background:linear-gradient(180deg,#fff7ff,#f5fbff);
   border:1px solid var(--border);

@@ -32,7 +32,7 @@
   <main class="wrap" style="padding-top:12px;padding-bottom:40px">
     <div id="errorBanner" class="error-banner" style="display:none" role="alert" aria-live="assertive"></div>
 
-    <section class="coach-hero" id="teacherHero" aria-labelledby="coachHeroTitle">
+    <section class="coach-hero" id="teacherHero" data-role="teacher" aria-labelledby="coachHeroTitle">
       <div>
         <div class="caps">講師向け支援</div>
         <h2 id="coachHeroTitle">最初に見るべき答案と生徒状況をひと目で確認</h2>
@@ -979,6 +979,17 @@
     const SERVER_DEFAULT_APP_MODE = "{{ default_app_mode | default('student') }}";
     let APP_MODE = localStorage.getItem(APP_MODE_KEY) || SERVER_DEFAULT_APP_MODE || 'student';
     let teacherPrimaryPane = localStorage.getItem(TEACHER_PANE_KEY) || 'teacher-top';
+    const viewState = {
+      get mode(){
+        return APP_MODE;
+      },
+      set mode(nextMode){
+        APP_MODE = nextMode === 'teacher' ? 'teacher' : 'student';
+      },
+      isTeacher(){
+        return this.mode === 'teacher';
+      }
+    };
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
     const ANON_USER_ID_KEY = 'anonUserId';
@@ -1038,7 +1049,7 @@
     }
 
     function applyRoleMode(mode){
-      APP_MODE = mode === 'student' ? 'student' : 'teacher';
+      viewState.mode = mode;
       localStorage.setItem(APP_MODE_KEY, APP_MODE);
       document.body.setAttribute('data-app-mode', APP_MODE);
       document.querySelectorAll('[data-role]').forEach(el=>{
@@ -1064,12 +1075,18 @@
       if(modalDesc) modalDesc.textContent = APP_MODE === 'student'
         ? '教科・単元を絞って問題を選びましょう。'
         : '条件を絞って、使いたい問題を選択してください。';
-      if(APP_MODE === 'teacher'){
+      if(viewState.isTeacher()){
         setTeacherPrimaryPane(teacherPrimaryPane);
+        refreshTeacherDashboard();
       }else{
         document.querySelectorAll('[data-pane]').forEach(el=>{ el.style.display = ''; });
+        resetTeacherDashboardUI();
         refreshStudentQuestionFlow();
       }
+    }
+
+    function shouldFetchTeacherData(){
+      return viewState.isTeacher();
     }
 
 
@@ -1606,6 +1623,10 @@
     async function openStudentDrilldown(userKey){
       const wrap = $('#studentDrilldown');
       if(!wrap) return;
+      if(!shouldFetchTeacherData()){
+        wrap.innerHTML = '';
+        return;
+      }
       if(!userKey){
         wrap.innerHTML = '<div class="small muted">生徒名をクリックすると、問題別の点数・リライト回数・弱点傾向・次の声がけを表示します。</div>';
         return;
@@ -1814,7 +1835,30 @@
       });
     }
 
+    function resetTeacherDashboardUI(){
+      ['#kpiSubmitted', '#kpiNeedsReview', '#kpiResubmission', '#kpiWeakStudents'].forEach(sel=>{
+        const el = $(sel);
+        if(el) el.textContent = '-';
+      });
+      const reviewList = $('#needsReviewList');
+      if(reviewList) reviewList.innerHTML = '';
+      const weakList = $('#studentWeaknessList');
+      if(weakList) weakList.innerHTML = '';
+      const drilldown = $('#studentDrilldown');
+      if(drilldown) drilldown.innerHTML = '';
+      const notice = $('#teacherAccessNotice');
+      if(notice){
+        notice.style.display = 'none';
+        notice.textContent = '';
+      }
+      window.__lastDashboard = {};
+    }
+
     async function refreshTeacherDashboard(){
+      if(!shouldFetchTeacherData()){
+        resetTeacherDashboardUI();
+        return;
+      }
       const notice = $('#teacherAccessNotice');
       try{
         const r = await apiGet('/api/teacher/dashboard');
@@ -2303,7 +2347,9 @@
       refreshUsage();
       refreshStockSummary();
       refreshTeacherStockList();
-      refreshTeacherDashboard();
+      if(shouldFetchTeacherData()){
+        refreshTeacherDashboard();
+      }
       refreshStudentInsights();
       refreshStudentQuestionFlow();
     }
@@ -3239,7 +3285,9 @@
         renderComparisonPanel(r, body.student_answer);
         updateAssistStatus();
         await refreshUsage();
-        await refreshTeacherDashboard();
+        if(shouldFetchTeacherData()){
+          await refreshTeacherDashboard();
+        }
         await refreshStudentInsights();
         hideErrorBanner();
         lastRecoverAction = null;
