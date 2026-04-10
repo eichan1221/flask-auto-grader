@@ -242,6 +242,24 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def build_teacher_coaching_suggestions(weakness_ranked: List[Dict[str, Any]], struggling_count: int = 0) -> List[str]:
+    suggestions: List[str] = []
+    top_categories = [normalize_text(x.get("category", "")) for x in weakness_ranked[:3] if isinstance(x, dict)]
+    if "理由" in top_categories or "因果関係" in top_categories:
+        suggestions.append("次回は「結論→理由→具体例」の順で1文ずつ書くよう声がけしてください。")
+    if "用語の正確さ" in top_categories:
+        suggestions.append("用語の定義と語句の使い方を先に確認してから書き始めるよう促してください。")
+    if "具体性" in top_categories:
+        suggestions.append("資料・数値・地名など具体語を最低1つ入れるよう指導してください。")
+    if "結論" in top_categories:
+        suggestions.append("書き出しで結論を先に言い切る型を定着させる声がけが有効です。")
+    if struggling_count >= 2:
+        suggestions.append("伸びにくい問題は口頭で因果関係を整理してから再提出させると効果的です。")
+    if not suggestions:
+        suggestions.append("安定しているので、現在の答案構成を維持しつつ語句の正確さ確認を続けてください。")
+    return suggestions[:3]
+
+
 def infer_question_type_label(question: str, tags: Optional[List[str]] = None) -> str:
     q = normalize_text(question)
     tags_text = " ".join([normalize_text(t) for t in (tags or [])])
@@ -2093,6 +2111,7 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
         if not rows:
             continue
         recent_rows = sorted(rows, key=lambda x: int(x.get("ts", 0) or 0), reverse=True)[:TEACHER_WEAKNESS_WINDOW]
+        latest_row = recent_rows[0]
         weakness_counter: Dict[str, int] = {}
         for row in recent_rows:
             for c in _normalize_log_categories(row.get("weakness_categories", [])):
@@ -2100,6 +2119,30 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
 
         if not weakness_counter:
             continue
+        full_score_count = 0
+        low_score_count = 0
+        rewrite_sum = 0
+        struggling_questions = 0
+        unique_questions = {}
+        for row in rows:
+            qk = normalize_text(row.get("question_key", "")) or ""
+            unique_questions.setdefault(qk, []).append(row)
+            score = _safe_int(row.get("score", 0), 0)
+            max_points = max(1, _safe_int(row.get("max_points", 10), 10))
+            if score >= max_points:
+                full_score_count += 1
+            if score < (6 if max_points == 10 else int(max_points * 0.6)):
+                low_score_count += 1
+            rewrite_sum += max(_safe_int(row.get("rewrite_count", 0), 0), 0)
+
+        for _, q_rows in unique_questions.items():
+            q_rows = sorted(q_rows, key=lambda x: int(x.get("ts", 0) or 0))
+            latest_q = q_rows[-1]
+            latest_score = _safe_int(latest_q.get("score", 0), 0)
+            max_points = max(1, _safe_int(latest_q.get("max_points", 10), 10))
+            if len(q_rows) >= 3 and latest_score < max_points:
+                struggling_questions += 1
+
         total = sum(weakness_counter.values())
         sorted_weak = sorted(weakness_counter.items(), key=lambda x: x[1], reverse=True)
         top = [name for name, _ in sorted_weak[:2]]
@@ -2121,11 +2164,24 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
             "recent_focus_window": recent_focus_window,
             "weakness_total": total,
             "recent_answers": len(recent_rows),
-            "latest_question_brief": build_question_brief(recent_rows[0].get("question_preview", ""), normalize_text(recent_rows[0].get("question_key", ""))),
-            "latest_subject": normalize_text(recent_rows[0].get("subject", "")) or "未設定",
-            "latest_category": normalize_text(recent_rows[0].get("category", "")) or "未設定",
-            "latest_unit": normalize_text(recent_rows[0].get("unit", "")) or "",
+            "latest_question_brief": build_question_brief(latest_row.get("question_preview", ""), normalize_text(latest_row.get("question_key", ""))),
+            "latest_subject": normalize_text(latest_row.get("subject", "")) or "未設定",
+            "latest_category": normalize_text(latest_row.get("category", "")) or "未設定",
+            "latest_unit": normalize_text(latest_row.get("unit", "")) or "",
             "submission_count_total": len(rows),
+            "latest_score": _safe_int(latest_row.get("score", 0), 0),
+            "latest_max_points": max(1, _safe_int(latest_row.get("max_points", 10), 10)),
+            "full_score_count": full_score_count,
+            "full_score_rate": round(full_score_count / max(1, len(rows)), 2),
+            "avg_rewrite_count": round(rewrite_sum / max(1, len(rows)), 2),
+            "low_score_count": low_score_count,
+            "struggling_question_count": struggling_questions,
+            "needs_attention": bool(struggling_questions >= 1 or low_score_count >= 2 or total >= 4),
+            "attention_label": "要確認" if (struggling_questions >= 1 or low_score_count >= 2 or total >= 4) else "安定",
+            "next_coaching_tip": build_teacher_coaching_suggestions(
+                [{"category": n, "count": cnt} for n, cnt in sorted_weak],
+                struggling_count=struggling_questions,
+            )[0],
         })
         if total >= 3:
             weak_students.add(student_labels.get(user_key, user_key))
@@ -2133,6 +2189,8 @@ def analyze_teacher_dashboard(limit: int = 500) -> Dict[str, Any]:
     review_items.sort(key=lambda x: (x.get("priority_score", 0), x.get("ts", 0)), reverse=True)
     students.sort(
         key=lambda x: (
+            1 if x.get("needs_attention") else 0,
+            x.get("struggling_question_count", 0),
             x.get("weakness_total", 0),
             sum(i.get("count", 0) for i in x.get("recent_hot_weaknesses", [])),
         ),
@@ -2327,6 +2385,15 @@ def api_teacher_student(user_key: str):
         rows.sort(key=lambda x: int(x.get("ts", 0) or 0))
         latest = rows[-1]
         first = rows[0]
+        max_points = int(latest.get("max_points", 10) or 10)
+        first_full_score_attempt = None
+        for i, row in enumerate(rows):
+            if int(row.get("score", 0) or 0) >= max_points:
+                first_full_score_attempt = i + 1
+                break
+        low_threshold = 6 if max_points == 10 else int(max_points * 0.6)
+        low_scores = [r for r in rows if int(r.get("score", 0) or 0) < low_threshold]
+        struggling = len(rows) >= 3 and int(latest.get("score", 0) or 0) < max_points
         items.append({
             "question_key": qkey,
             "question": latest.get("question_preview", "（問題テキスト非表示）"),
@@ -2337,21 +2404,42 @@ def api_teacher_student(user_key: str):
             "question_type": normalize_text(latest.get("question_type", "")) or infer_question_type_label(latest.get("question_preview", ""), latest.get("tags", [])),
             "attempt_count": len(rows),
             "latest_score": int(latest.get("score", 0) or 0),
-            "max_points": int(latest.get("max_points", 10) or 10),
+            "max_points": max_points,
             "latest_request_id": latest.get("request_id", ""),
             "first_answer": normalize_text(first.get("student_answer", ""))[:160],
             "latest_answer": normalize_text(latest.get("student_answer", ""))[:160],
             "first_score": int(first.get("score", 0) or 0),
             "weakness_categories": _normalize_log_categories(latest.get("weakness_categories", [])),
+            "rewrite_count": max(len(rows) - 1, 0),
+            "reached_full_score": bool(first_full_score_attempt is not None),
+            "full_score_attempt": first_full_score_attempt,
+            "low_score_count": len(low_scores),
+            "is_struggling": struggling,
             "ts": int(latest.get("ts", 0) or 0),
         })
 
     items.sort(key=lambda x: x.get("ts", 0), reverse=True)
     analysis = build_learning_analysis_base(limit=700, user_key=target)
+    weakness_counter: Dict[str, int] = {}
+    for it in items:
+        for cat in it.get("weakness_categories", []):
+            weakness_counter[cat] = weakness_counter.get(cat, 0) + 1
+    weakness_ranked = sorted(weakness_counter.items(), key=lambda x: x[1], reverse=True)
+    struggling_items = [it for it in items if it.get("is_struggling")]
+    coaching_suggestions = build_teacher_coaching_suggestions(
+        [{"category": name, "count": count} for name, count in weakness_ranked],
+        struggling_count=len(struggling_items),
+    )
     return jsonify({
         "ok": True,
         "student": {"user_key": target, "student_label": label},
         "items": items[:20],
+        "summary": {
+            "question_count": len(items),
+            "struggling_question_count": len(struggling_items),
+            "weakness_ranked": [{"category": name, "count": count} for name, count in weakness_ranked],
+            "coaching_suggestions": coaching_suggestions,
+        },
         "analysis": {
             "by_unit": analysis.get("by_unit", []),
             "by_question_type": analysis.get("by_question_type", []),
