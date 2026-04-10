@@ -44,7 +44,12 @@
       </div>
     </section>
 
-    <section class="card" id="teacherDashboard" data-role="teacher" aria-labelledby="teacherDashboardTitle">
+    <nav class="teacher-primary-nav" data-role="teacher" aria-label="講師画面の上位導線">
+      <button class="btn nav-btn active" id="btnPaneTeacherTop" type="button" data-pane-target="teacher-top">講師トップ</button>
+      <button class="btn nav-btn" id="btnPaneStock" type="button" data-pane-target="stock">ストック</button>
+    </nav>
+
+    <section class="card" id="teacherDashboard" data-role="teacher" data-pane="teacher-top" aria-labelledby="teacherDashboardTitle">
       <div id="teacherAccessNotice" class="notice" style="display:none"></div>
       <div class="toolbar">
         <h2 id="teacherDashboardTitle">講師トップ（優先確認）</h2>
@@ -132,11 +137,11 @@
       </div>
     </div>
 
-    <div class="row" style="margin-top:12px">
+    <div class="row teacher-layout" style="margin-top:12px">
       <!-- 左：固定ストック運用 -->
-      <section class="card" id="stockOpsSection" data-role="both">
+      <section class="card" id="stockOpsSection" data-role="both" data-pane="stock">
         <div class="toolbar">
-          <h2>① 固定ストック問題の運用</h2>
+          <h2>ストック管理（固定問題）</h2>
           <div class="flex">
             <button class="btn" id="btnExportJson">📦 stocks.json</button>
             <button class="btn" id="btnExportCsv">📊 stocks.csv</button>
@@ -331,9 +336,9 @@
       </section>
 
       <!-- 右：採点 -->
-      <section class="card" id="gradingSection" data-role="both">
+      <section class="card" id="gradingSection" data-role="both" data-pane="teacher-top">
         <div class="toolbar">
-          <h2>② 採点</h2>
+          <h2>答案詳細・採点確認</h2>
           <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
         </div>
         <div class="flow-guide" id="flowGuide" aria-live="polite">問題を読む → 解答を書く → 採点する → コメントを見て書き直す</div>
@@ -880,10 +885,10 @@
   </div>
 
   <div class="action-bar" id="actionBar" role="navigation" aria-label="主要アクション">
-    <button class="action-btn" data-action="grade">採点</button>
+    <button class="action-btn" data-action="teacherTop">講師トップ</button>
+    <button class="action-btn" data-action="stockNav">ストック</button>
     <button class="action-btn" data-action="rewrite">書き直し</button>
     <button class="action-btn" data-action="next">次の問題</button>
-    <button class="action-btn" data-action="stock">ストック</button>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -921,7 +926,9 @@
 
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
     const APP_MODE_KEY = 'cyopa_app_mode_v1';
+    const TEACHER_PANE_KEY = 'cyopa_teacher_primary_pane_v1';
     let APP_MODE = localStorage.getItem(APP_MODE_KEY) || 'teacher';
+    let teacherPrimaryPane = localStorage.getItem(TEACHER_PANE_KEY) || 'teacher-top';
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
     const ANON_USER_ID_KEY = 'anonUserId';
@@ -965,6 +972,20 @@
     if(!['teacher','student'].includes(APP_MODE)){
       APP_MODE = 'teacher';
     }
+    if(!['teacher-top', 'stock'].includes(teacherPrimaryPane)){
+      teacherPrimaryPane = 'teacher-top';
+    }
+
+    function setTeacherPrimaryPane(pane){
+      teacherPrimaryPane = pane === 'stock' ? 'stock' : 'teacher-top';
+      localStorage.setItem(TEACHER_PANE_KEY, teacherPrimaryPane);
+      document.querySelectorAll('[data-pane]').forEach(el=>{
+        el.style.display = (el.dataset.pane === teacherPrimaryPane) ? '' : 'none';
+      });
+      document.querySelectorAll('.teacher-primary-nav .nav-btn').forEach(btn=>{
+        btn.classList.toggle('active', btn.dataset.paneTarget === teacherPrimaryPane);
+      });
+    }
 
     function applyRoleMode(mode){
       APP_MODE = mode === 'student' ? 'student' : 'teacher';
@@ -986,6 +1007,11 @@
       const openStockBtn = $('#btnOpenStock');
       if(openStockBtn){
         openStockBtn.textContent = APP_MODE === 'student' ? '問題を選ぶ' : 'ストックを開く';
+      }
+      if(APP_MODE === 'teacher'){
+        setTeacherPrimaryPane(teacherPrimaryPane);
+      }else{
+        document.querySelectorAll('[data-pane]').forEach(el=>{ el.style.display = ''; });
       }
     }
 
@@ -3019,6 +3045,8 @@
     $('#btnHowto')?.addEventListener('click', openHowto);
     $('#btnRoleTeacher')?.addEventListener('click', ()=> applyRoleMode('teacher'));
     $('#btnRoleStudent')?.addEventListener('click', ()=> applyRoleMode('student'));
+    $('#btnPaneTeacherTop')?.addEventListener('click', ()=> setTeacherPrimaryPane('teacher-top'));
+    $('#btnPaneStock')?.addEventListener('click', ()=> setTeacherPrimaryPane('stock'));
     $('#btnJumpNeedsReview')?.addEventListener('click', jumpToNeedsReview);
     $('#btnJumpWeakness')?.addEventListener('click', jumpToWeakness);
     $('#btnToggleTopActions')?.addEventListener('click', ()=>{
@@ -3150,12 +3178,21 @@
       const btn = e.target.closest('.action-btn');
       if(!btn) return;
       const action = btn.dataset.action;
-      if((action === 'grade' || action === 'rewrite') && gradingInFlight){
+      if(action === 'rewrite' && gradingInFlight){
         toast('採点中です…', false);
         return;
       }
+      if(action === 'teacherTop'){
+        if(APP_MODE === 'teacher') setTeacherPrimaryPane('teacher-top');
+        scrollToElement($('#teacherDashboard'));
+        return;
+      }
+      if(action === 'stockNav'){
+        if(APP_MODE === 'teacher') setTeacherPrimaryPane('stock');
+        scrollToElement($('#stockOpsSection'));
+        return;
+      }
       const map = {
-        grade: '#btnGrade',
         rewrite: '#btnRewrite',
         next: '#btnGenerate',
         stock: '#btnOpenStock'

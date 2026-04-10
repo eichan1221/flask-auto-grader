@@ -182,6 +182,22 @@ textarea{min-height:120px;resize:vertical}
 .quickstart-collapsible summary{list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
 .quickstart-collapsible summary::-webkit-details-marker{display:none}
 .quickstart-body{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+.teacher-primary-nav{
+  display:flex;
+  gap:8px;
+  margin:0 0 12px;
+}
+.teacher-primary-nav .nav-btn{
+  min-width:140px;
+}
+.teacher-primary-nav .nav-btn.active{
+  background:var(--brand);
+  border-color:var(--brand);
+  color:#fff;
+}
+.teacher-layout{
+  grid-template-columns:1fr;
+}
 
 .callout{
   background:linear-gradient(180deg,#fff7ff,#f5fbff);
@@ -453,11 +469,12 @@ textarea{min-height:120px;resize:vertical}
   .wrap{padding:12px}
   main.wrap{padding-top:8px!important}
   .row{display:flex;flex-direction:column;gap:12px}
-  #gradingSection{order:-1}
   #gradingSection .toolbar{align-items:flex-start}
   #gradingSection #btnExportGrading{display:none}
   .coach-hero{flex-direction:column}
   .coach-hero h2{font-size:19px}
+  .teacher-primary-nav{overflow:auto;padding-bottom:2px}
+  .teacher-primary-nav .nav-btn{min-width:120px}
   #topToolbar{align-items:flex-start}
   .mobile-toolbar-toggle{display:inline-flex}
   .top-actions{display:none;width:100%}
