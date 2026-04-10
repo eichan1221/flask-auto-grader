@@ -964,6 +964,10 @@ def _is_teacher_request() -> bool:
         return False
     return hmac.compare_digest(str(provided), str(expected))
 
+def _explicit_student_mode_request() -> bool:
+    mode = normalize_text(request.headers.get("X-App-Mode", "")).lower()
+    return mode == "student"
+
 def _strip_hints(item: Dict[str, Any]) -> Dict[str, Any]:
     # 生徒には見せたくない要素を落とす
     for k in ("model_answer", "explanation", "intention"):
@@ -2401,6 +2405,12 @@ def root():
 
 @app.get("/api/teacher/dashboard")
 def api_teacher_dashboard():
+    if _explicit_student_mode_request():
+        return jsonify({
+            "ok": False,
+            "error": "teacher_mode_required",
+            "message": "生徒モードでは講師トップを表示しません。講師モードでアクセスしてください。",
+        }), 403
     if ACCESS_CODE and not _is_teacher_request():
         return jsonify({
             "ok": False,
@@ -2412,6 +2422,12 @@ def api_teacher_dashboard():
 
 @app.get("/api/teacher/student/<user_key>")
 def api_teacher_student(user_key: str):
+    if _explicit_student_mode_request():
+        return jsonify({
+            "ok": False,
+            "error": "teacher_mode_required",
+            "message": "生徒モードでは講師用の生徒分析APIを利用できません。",
+        }), 403
     if ACCESS_CODE and not _is_teacher_request():
         return jsonify({
             "ok": False,
@@ -2505,6 +2521,12 @@ def api_teacher_student(user_key: str):
 
 @app.get("/api/teacher/analysis_base")
 def api_teacher_analysis_base():
+    if _explicit_student_mode_request():
+        return jsonify({
+            "ok": False,
+            "error": "teacher_mode_required",
+            "message": "生徒モードでは講師分析APIを利用できません。",
+        }), 403
     if ACCESS_CODE and not _is_teacher_request():
         return jsonify({
             "ok": False,
