@@ -379,6 +379,24 @@ textarea{min-height:120px;resize:vertical}
   border-color:#ddd6fe;
   color:#5b21b6;
 }
+.student-link-btn{
+  border:none;
+  background:transparent;
+  color:#1d4ed8;
+  font-weight:700;
+  cursor:pointer;
+  padding:0;
+  text-decoration:underline;
+}
+.student-link-btn:hover{color:#1e40af}
+.student-detail-header{
+  border:1px solid #dbeafe;
+  background:#f8fbff;
+}
+.coach-suggestion{
+  margin-top:4px;
+  color:#1e40af;
+}
 
 /* 学習履歴 */
 .history-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}

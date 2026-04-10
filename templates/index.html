@@ -85,7 +85,7 @@
         </div>
       </div>
       <div class="qcard" style="margin-top:10px">
-        <div class="small muted">生徒別答案履歴・比較（講師アクション）</div>
+        <div class="small muted">生徒別の個別状況（クリックで詳細）</div>
         <div id="studentDrilldown" class="list" style="max-height:240px"></div>
       </div>
     </section>
@@ -1526,7 +1526,7 @@
       const wrap = $('#studentDrilldown');
       if(!wrap) return;
       if(!userKey){
-        wrap.innerHTML = '<div class="small muted">生徒を選ぶと、直近の答案履歴と比較を表示します。</div>';
+        wrap.innerHTML = '<div class="small muted">生徒名をクリックすると、問題別の点数・リライト回数・弱点傾向・次の声がけを表示します。</div>';
         return;
       }
       wrap.innerHTML = '<div class="small muted">読み込み中...</div>';
@@ -1534,15 +1534,33 @@
         const r = await apiGet(`/api/teacher/student/${encodeURIComponent(userKey)}`);
         const items = Array.isArray(r?.items) ? r.items : [];
         const analysis = r?.analysis || {};
+        const summary = r?.summary || {};
+        const studentName = r?.student?.student_label || userKey;
         if(!items.length){
           wrap.innerHTML = '<div class="small muted">この生徒の履歴はまだありません。</div>';
           return;
         }
         wrap.innerHTML = '';
+        const header = document.createElement('div');
+        header.className = 'item student-detail-header';
+        const weakTop = Array.isArray(summary.weakness_ranked)
+          ? summary.weakness_ranked.slice(0, 3).map(x=>`${x.category}:${x.count}件`).join(' / ')
+          : '-';
+        const suggestion = Array.isArray(summary.coaching_suggestions) ? summary.coaching_suggestions : [];
+        header.innerHTML = `
+          <div><b>${escapeHtml(studentName)} の個別状況</b></div>
+          <div class="small">問題数: ${escapeHtml(String(summary.question_count || items.length))} / 苦戦中: ${escapeHtml(String(summary.struggling_question_count || 0))}問</div>
+          <div class="small muted">弱点上位: ${escapeHtml(weakTop || '-')}</div>
+          <div class="small coach-suggestion">次の声がけ: ${escapeHtml(suggestion[0] || 'データ不足')}</div>
+        `;
+        wrap.appendChild(header);
         items.slice(0, 6).forEach(it=>{
           const div = document.createElement('div');
           div.className = 'item';
           const improved = Number(it.latest_score ?? 0) - Number(it.first_score ?? 0);
+          const weaknessText = Array.isArray(it.weakness_categories) && it.weakness_categories.length
+            ? it.weakness_categories.join(' / ')
+            : '-';
           div.innerHTML = `
             <div><b>${escapeHtml((it.question_brief || it.question || '').slice(0, 48))}</b></div>
             <div class="meta-row">
@@ -1551,7 +1569,9 @@
               <span class="meta-chip">${escapeHtml(it.question_type || '記述説明')}</span>
               ${it.unit ? `<span class="meta-chip">${escapeHtml(it.unit)}</span>` : ''}
             </div>
-            <div class="small">比較: ${escapeHtml(String(it.first_score ?? 0))} → ${escapeHtml(String(it.latest_score ?? 0))} (${improved >= 0 ? '+' : ''}${improved}) / 提出${escapeHtml(String(it.attempt_count || 1))}回</div>
+            <div class="small">比較: ${escapeHtml(String(it.first_score ?? 0))} → ${escapeHtml(String(it.latest_score ?? 0))} (${improved >= 0 ? '+' : ''}${improved}) / 提出${escapeHtml(String(it.attempt_count || 1))}回（リライト${escapeHtml(String(it.rewrite_count || 0))}回）</div>
+            <div class="small">100点到達: ${it.reached_full_score ? `あり（${escapeHtml(String(it.full_score_attempt || '-'))}回目）` : '未到達'} / 苦戦判定: ${it.is_struggling ? '要フォロー' : '通常'}</div>
+            <div class="small muted">弱点観点: ${escapeHtml(weaknessText)}</div>
             <div class="small muted">初回: ${escapeHtml(it.first_answer || '-')}</div>
             <div class="small muted">最新: ${escapeHtml(it.latest_answer || '-')}</div>
           `;
@@ -1565,6 +1585,7 @@
           <div><b>軽い傾向メモ（講師向け）</b></div>
           <div class="small">単元: ${escapeHtml(unitHint ? `${unitHint.unit}（平均${unitHint.avg_score_100}点 / リライト${unitHint.avg_rewrite_count}回）` : 'データ不足')}</div>
           <div class="small">問題タイプ: ${escapeHtml(typeHint ? `${typeHint.question_type}（平均${typeHint.avg_score_100}点）` : 'データ不足')}</div>
+          <div class="small coach-suggestion">声がけ候補: ${escapeHtml(suggestion[1] || suggestion[0] || 'まずは弱点観点を1つに絞って声がけしてください。')}</div>
         `;
         wrap.appendChild(trend);
       }catch(e){
@@ -1684,20 +1705,23 @@
             const recentHot = Array.isArray(s.recent_hot_weaknesses)
               ? s.recent_hot_weaknesses.map(x=>`${x.category}:${x.count}件`).join(' / ')
               : '';
+            const scoreBadge = `${s.latest_score ?? 0}/${s.latest_max_points ?? 10}点`;
             div.innerHTML = `
-              <div><b>${escapeHtml(s.student_label || s.user_key || '匿名')}</b></div>
+              <div><button class="student-link-btn" data-drill-user="${escapeHtml(s.user_key || '')}">${escapeHtml(s.student_label || s.user_key || '匿名')}</button><span class="priority-chip">${escapeHtml(s.attention_label || '安定')}</span></div>
               <div class="small muted">直近取り組み: ${escapeHtml(s.latest_question_brief || '-')}</div>
               <div class="meta-row">
                 <span class="meta-chip">${escapeHtml(s.latest_subject || '未設定')}</span>
                 <span class="meta-chip">${escapeHtml(s.latest_category || '未設定')}</span>
                 ${s.latest_unit ? `<span class="meta-chip">${escapeHtml(s.latest_unit)}</span>` : ''}
                 <span class="meta-chip">${escapeHtml(String(s.submission_count_total || s.recent_answers || 0))}件提出</span>
+                <span class="meta-chip">${escapeHtml(scoreBadge)}</span>
               </div>
               <div class="small">主要弱点: ${escapeHtml((s.top_weaknesses || []).join(' / ') || '-')}</div>
+              <div class="small">100点到達率: ${escapeHtml(String(Math.round((Number(s.full_score_rate || 0)) * 100)))}% / 苦戦問題: ${escapeHtml(String(s.struggling_question_count || 0))}問</div>
               <div class="small muted">直近${escapeHtml(String(dash.weakness_window || 10))}件集計: ${escapeHtml(detail || '-')}</div>
               <div class="small">累積内訳: ${escapeHtml(ranked)}</div>
               <div class="small muted">直近${escapeHtml(String(s.recent_focus_window || 0))}件で多い弱点: ${escapeHtml(recentHot || '-')}</div>
-              <button class="btn small" data-drill-user="${escapeHtml(s.user_key || '')}">答案履歴と比較を表示</button>
+              <div class="small coach-suggestion">次の声がけ: ${escapeHtml(s.next_coaching_tip || '-')}</div>
             `;
             weakList.appendChild(div);
           });
