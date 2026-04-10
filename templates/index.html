@@ -17,7 +17,7 @@
       </div>
       <button class="btn small ghost mobile-toolbar-toggle" id="btnToggleTopActions" type="button" aria-expanded="false">メニュー</button>
       <div class="flex top-actions" id="topActions" style="gap:8px;align-items:center">
-        <span class="toolbar-note" id="roleBadge">講師向けダッシュボードを優先表示中</span>
+        <span class="toolbar-note" id="roleBadge">生徒向け解答画面</span>
         <div class="role-switch" role="group" aria-label="画面ロール切替">
           <button class="btn small role-btn active" id="btnRoleTeacher" type="button">講師用</button>
           <button class="btn small role-btn" id="btnRoleStudent" type="button">生徒用</button>
@@ -141,8 +141,9 @@
       <!-- 左：固定ストック運用 -->
       <section class="card" id="stockOpsSection" data-role="both" data-pane="stock">
         <div class="toolbar">
-          <h2>ストック管理（固定問題）</h2>
-          <div class="flex">
+          <h2 data-role="teacher">ストック管理（固定問題）</h2>
+          <h2 data-role="student">問題を選んで解答する</h2>
+          <div class="flex" data-role="teacher">
             <button class="btn" id="btnExportJson">📦 stocks.json</button>
             <button class="btn" id="btnExportCsv">📊 stocks.csv</button>
           </div>
@@ -153,7 +154,7 @@
           <span class="tab" data-subject="理科" tabindex="0">理科</span>
         </div>
 
-        <div class="stock-guide">
+        <div class="stock-guide" data-role="teacher">
           <div class="small muted">講師向け：固定ストック問題の進め方</div>
           <ol class="stock-guide-steps">
             <li>教科（社会/理科）と分類を選ぶ</li>
@@ -165,13 +166,38 @@
         <div class="student-flow-card" data-role="student">
           <div class="small muted">生徒用の進め方</div>
           <ol class="student-flow-steps">
-            <li>「ストックを開く」から問題を1つ選ぶ</li>
-            <li>解答して採点し、100点換算を確認する</li>
-            <li>模範解答を参考にリライトして再提出する</li>
+            <li>教科を選ぶ</li>
+            <li>単元を選ぶ</li>
+            <li>問題を選ぶ</li>
+            <li>解答して採点する</li>
           </ol>
         </div>
 
-        <div class="grid-2">
+        <div class="student-step-panel" data-role="student">
+          <div class="grid-3">
+            <div>
+              <label for="studentSubject">1. 教科を選ぶ</label>
+              <select id="studentSubject">
+                <option value="社会">社会</option>
+                <option value="理科">理科</option>
+              </select>
+            </div>
+            <div>
+              <label for="studentCategory">2. 単元分類を選ぶ</label>
+              <select id="studentCategory"></select>
+            </div>
+            <div>
+              <label for="studentUnit">3. 単元を選ぶ</label>
+              <select id="studentUnit">
+                <option value="">すべての単元</option>
+              </select>
+            </div>
+          </div>
+          <div class="small muted" id="studentQuestionGuide">4. 解きたい問題を選んで「この問題を解く」を押してください。</div>
+          <div class="student-stock-list" id="studentQuestionList"></div>
+        </div>
+
+        <div class="grid-2" data-role="teacher">
           <div>
             <label>分類（科目）</label>
             <select id="category">
@@ -200,7 +226,7 @@
           </div>
         </div>
 
-        <details class="advanced mvp-hidden" id="advancedSettings">
+        <details class="advanced mvp-hidden" id="advancedSettings" data-role="teacher">
           <summary>詳細設定（Advanced）</summary>
           <div class="grid-2" style="margin-top:10px">
             <div>
@@ -237,11 +263,11 @@
           </div>
         </details>
 
-        <div class="flex mvp-hidden" style="margin-top:8px">
+        <div class="flex mvp-hidden" style="margin-top:8px" data-role="teacher">
           <button class="btn brand" id="btnGenerate">問題を自動生成</button>
         </div>
 
-        <div id="genResult" class="mvp-hidden" style="margin-top:12px;display:none">
+        <div id="genResult" class="mvp-hidden" style="margin-top:12px;display:none" data-role="teacher">
           <h3>生成結果</h3>
           <div class="qcard">
             <div class="small muted" id="genMeta"></div>
@@ -338,8 +364,9 @@
       <!-- 右：採点 -->
       <section class="card" id="gradingSection" data-role="both" data-pane="teacher-top">
         <div class="toolbar">
-          <h2>答案詳細・採点確認</h2>
-          <button class="btn" id="btnExportGrading">🧾 grading.jsonl</button>
+          <h2 data-role="teacher">答案詳細・採点確認</h2>
+          <h2 data-role="student">問題文を読んで解答する</h2>
+          <button class="btn" id="btnExportGrading" data-role="teacher">🧾 grading.jsonl</button>
         </div>
         <div class="flow-guide" id="flowGuide" aria-live="polite">問題を読む → 解答を書く → 採点する → コメントを見て書き直す</div>
 
@@ -437,7 +464,7 @@
           <div class="small muted">※この履歴はこの端末のブラウザに保存されます。閉じても残ります。</div>
           <div class="history-controls">
             <div style="flex:1;min-width:180px">
-              <label for="nicknameInput">生徒表示名 / テスター名（任意）</label>
+              <label for="nicknameInput">生徒表示名（任意）</label>
               <input type="text" id="nicknameInput" placeholder="例: classA-01 / tester01" maxlength="24">
             </div>
             <button class="btn" id="btnResetHistory" type="button">学習ログをリセット</button>
@@ -738,8 +765,8 @@
     <div class="panel" role="dialog" aria-modal="true" aria-labelledby="stockModalTitle">
       <div class="panelHeader">
         <div>
-          <h2 class="panelTitle" id="stockModalTitle">ストック一覧（フィルタ・検索）</h2>
-          <div class="small muted">条件を絞って、使いたい問題を選択してください。</div>
+          <h2 class="panelTitle" id="stockModalTitle">問題一覧</h2>
+          <div class="small muted" id="stockModalDesc">条件を絞って、使いたい問題を選択してください。</div>
         </div>
         <div class="flex" style="gap:8px">
           <button class="btn" id="btnStockClose" aria-label="ストックを閉じる">閉じる</button>
@@ -885,7 +912,7 @@
   </div>
 
   <div class="action-bar" id="actionBar" role="navigation" aria-label="主要アクション">
-    <button class="action-btn" data-action="teacherTop">講師トップ</button>
+    <button class="action-btn" data-action="teacherTop" data-role="teacher">講師トップ</button>
     <button class="action-btn" data-action="stockNav">ストック</button>
     <button class="action-btn" data-action="rewrite">書き直し</button>
     <button class="action-btn" data-action="next">次の問題</button>
@@ -927,7 +954,8 @@
     const AI_TEACHER_STORAGE_KEY = 'cyopa_ai_teacher_chat_v1';
     const APP_MODE_KEY = 'cyopa_app_mode_v1';
     const TEACHER_PANE_KEY = 'cyopa_teacher_primary_pane_v1';
-    let APP_MODE = localStorage.getItem(APP_MODE_KEY) || 'teacher';
+    const SERVER_DEFAULT_APP_MODE = "{{ default_app_mode | default('student') }}";
+    let APP_MODE = localStorage.getItem(APP_MODE_KEY) || SERVER_DEFAULT_APP_MODE || 'student';
     let teacherPrimaryPane = localStorage.getItem(TEACHER_PANE_KEY) || 'teacher-top';
     const AI_TEACHER_MAX_MESSAGES = 60;
     const AI_TEACHER_HISTORY_LIMIT = 12;
@@ -970,7 +998,7 @@
     }
 
     if(!['teacher','student'].includes(APP_MODE)){
-      APP_MODE = 'teacher';
+      APP_MODE = 'student';
     }
     if(!['teacher-top', 'stock'].includes(teacherPrimaryPane)){
       teacherPrimaryPane = 'teacher-top';
@@ -1008,10 +1036,17 @@
       if(openStockBtn){
         openStockBtn.textContent = APP_MODE === 'student' ? '問題を選ぶ' : 'ストックを開く';
       }
+      const modalTitle = $('#stockModalTitle');
+      const modalDesc = $('#stockModalDesc');
+      if(modalTitle) modalTitle.textContent = APP_MODE === 'student' ? '問題を選ぶ' : 'ストック一覧（フィルタ・検索）';
+      if(modalDesc) modalDesc.textContent = APP_MODE === 'student'
+        ? '教科・単元を絞って問題を選びましょう。'
+        : '条件を絞って、使いたい問題を選択してください。';
       if(APP_MODE === 'teacher'){
         setTeacherPrimaryPane(teacherPrimaryPane);
       }else{
         document.querySelectorAll('[data-pane]').forEach(el=>{ el.style.display = ''; });
+        refreshStudentQuestionFlow();
       }
     }
 
@@ -1413,6 +1448,32 @@
       applyStockScienceConstraints();
     }
 
+    function setStudentCategories(subjectVal){
+      const cat = $('#studentCategory');
+      if(!cat) return;
+      cat.innerHTML = '';
+      const options = subjectVal === '社会'
+        ? ['地理','歴史']
+        : ['生物','化学','地学','物理','天体'];
+      options.forEach(x=>{
+        const o = document.createElement('option');
+        o.value = x;
+        o.textContent = x;
+        cat.appendChild(o);
+      });
+    }
+
+    function applyStudentSelectionToMain(subjectVal, categoryVal){
+      if(subjectVal && subjectVal !== subject){
+        subject = subjectVal;
+        updateSubjectTabs();
+      }
+      if(categoryVal && $('#category')){
+        $('#category').value = categoryVal;
+      }
+      applyScienceConstraints();
+    }
+
     // ---- 利用状況バッジ ----
     async function refreshUsage(){
       const mainBadge = $('#mainUsageBadge');
@@ -1689,6 +1750,73 @@
         summary.textContent = `ストック合計 ${total}件（社会:${social} / 理科:${science} / 単元:${units.size}）`;
       }catch(e){
         summary.textContent = 'ストックはモーダルで一覧・検索できます。';
+      }
+    }
+
+    function renderStudentStockList(items){
+      const wrap = $('#studentQuestionList');
+      if(!wrap) return;
+      wrap.innerHTML = '';
+      if(!items.length){
+        wrap.innerHTML = '<div class="small muted">条件に合う問題がありません。教科や単元を変えてみてください。</div>';
+        return;
+      }
+      items.slice(0, 12).forEach((it, index)=>{
+        const card = document.createElement('div');
+        card.className = 'student-stock-item';
+        const question = escapeHtml(it.question || '');
+        const label = `問題 ${index + 1}`;
+        card.innerHTML = `
+          <div class="small muted">${label} / ${escapeHtml(it.category || it.domain || '未設定')}${it.unit ? ` / ${escapeHtml(it.unit)}` : ''}</div>
+          <div class="student-stock-question">${question}</div>
+        `;
+        const btn = document.createElement('button');
+        btn.className = 'btn brand small';
+        btn.textContent = 'この問題を解く';
+        btn.onclick = ()=> useStock(it);
+        card.appendChild(btn);
+        wrap.appendChild(card);
+      });
+    }
+
+    async function refreshStudentQuestionFlow(){
+      const subjectEl = $('#studentSubject');
+      const categoryEl = $('#studentCategory');
+      const unitEl = $('#studentUnit');
+      if(!subjectEl || !categoryEl || !unitEl) return;
+      const subjectVal = subjectEl.value || '社会';
+      const categoryVal = categoryEl.value || '';
+      const unitVal = unitEl.value || '';
+      applyStudentSelectionToMain(subjectVal, categoryVal);
+      try{
+        const qs = buildQueryString({
+          limit: 200,
+          order: 'new',
+          subject: subjectVal,
+          category: categoryVal,
+          domain: categoryVal,
+          unit: unitVal,
+          difficulty: '10点',
+          max_points: 10,
+        });
+        const r = await apiGet('/api/stock/list' + qs);
+        const items = Array.isArray(r.items) ? r.items : [];
+        const units = [...new Set(items.map(x=>(x.unit || '').trim()).filter(Boolean))];
+        const keep = unitEl.value;
+        unitEl.innerHTML = '<option value="">すべての単元</option>';
+        units.forEach(u=>{
+          const op = document.createElement('option');
+          op.value = u;
+          op.textContent = u;
+          unitEl.appendChild(op);
+        });
+        if(keep && units.includes(keep)) unitEl.value = keep;
+        renderStudentStockList(items);
+      }catch(e){
+        const wrap = $('#studentQuestionList');
+        if(wrap){
+          wrap.innerHTML = '<div class="small danger">問題一覧の取得に失敗しました。再読込して再試行してください。</div>';
+        }
       }
     }
 
@@ -2001,6 +2129,14 @@
 
       updateSubjectTabs();
       applyScienceConstraints();
+      const studentSubject = $('#studentSubject');
+      if(studentSubject){
+        studentSubject.value = subject;
+      }
+      setStudentCategories(subject);
+      if($('#studentCategory')){
+        $('#studentCategory').value = $('#category')?.value || $('#studentCategory').value;
+      }
       setTeacherStockCategories($('#teacherStockSubject')?.value || '社会');
       $('#settingsCard').style.display = 'none';
       refreshUsage();
@@ -2008,6 +2144,7 @@
       refreshTeacherStockList();
       refreshTeacherDashboard();
       refreshStudentInsights();
+      refreshStudentQuestionFlow();
     }
 
     // ---- 生成UIロジック ----
@@ -3080,6 +3217,13 @@
     $('#stockSearch').addEventListener('keydown', (e)=>{
       if(e.key === 'Enter'){ refreshStockModal(); e.preventDefault(); }
     });
+    $('#studentSubject')?.addEventListener('change', ()=>{
+      const subjectVal = $('#studentSubject')?.value || '社会';
+      setStudentCategories(subjectVal);
+      refreshStudentQuestionFlow();
+    });
+    $('#studentCategory')?.addEventListener('change', refreshStudentQuestionFlow);
+    $('#studentUnit')?.addEventListener('change', refreshStudentQuestionFlow);
     $('#teacherStockSubject').onchange = ()=> setTeacherStockCategories($('#teacherStockSubject').value);
     $('#btnTeacherStockAdd').onclick = addTeacherStock;
 

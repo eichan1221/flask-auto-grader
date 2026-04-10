@@ -157,6 +157,29 @@ textarea{min-height:120px;resize:vertical}
   background:#fafaff;
 }
 .student-flow-steps{margin:6px 0 0;padding-left:18px;line-height:1.7}
+.student-step-panel{
+  margin-top:10px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+.student-stock-list{
+  margin-top:10px;
+  display:grid;
+  gap:8px;
+}
+.student-stock-item{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  background:#fcfcff;
+  display:grid;
+  gap:8px;
+}
+.student-stock-question{
+  line-height:1.7;
+}
 .icon-btn{
   width:40px;
   min-width:40px;
