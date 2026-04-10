@@ -120,7 +120,7 @@ FREE_DAILY_MAIN_LIMIT = int(os.getenv("FREE_DAILY_MAIN_LIMIT", "20"))
 FREE_DAILY_AI_LIMIT = int(os.getenv("FREE_DAILY_AI_LIMIT", "5"))
 ENABLE_DAILY_LIMIT = env_bool("ENABLE_DAILY_LIMIT", True)
 DAILY_LIMIT_BYPASS_FOR_TEACHER = env_bool("DAILY_LIMIT_BYPASS_FOR_TEACHER", True)
-DEFAULT_APP_MODE = (os.getenv("DEFAULT_APP_MODE", "teacher") or "teacher").strip().lower()
+DEFAULT_APP_MODE = (os.getenv("DEFAULT_APP_MODE", "student") or "student").strip().lower()
 
 # 入力のホワイトリスト
 ALLOWED_SUBJECTS = {"社会", "理科"}
@@ -2223,7 +2223,7 @@ def build_light_student_insights(user_key: str, limit: int = 700) -> Dict[str, A
 # =========================
 @app.get("/")
 def root():
-    return render_template("index.html")
+    return render_template("index.html", default_app_mode=DEFAULT_APP_MODE)
 
 
 @app.get("/api/teacher/dashboard")
