@@ -241,9 +241,32 @@ textarea{min-height:120px;resize:vertical}
 /* 結果ヘッダブロック */
 .result-header{background:linear-gradient(180deg,#fff,#f7f2ff)}
 .result-summary{display:flex;flex-direction:column;gap:12px}
+.score-main-100{
+  font-size:34px;
+  font-weight:800;
+  color:#6d28d9;
+  line-height:1.1;
+  margin-top:4px;
+}
 .summary-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .summary-continue{border-top:1px dashed var(--border);padding-top:10px}
+.student-learning-panel{
+  border:1px solid #ddd6fe;
+  border-radius:12px;
+  padding:10px 12px;
+  background:#faf5ff;
+}
+.student-learning-grid{
+  margin-top:6px;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+}
+@media (max-width:700px){
+  .student-learning-grid{grid-template-columns:1fr}
+  .score-main-100{font-size:30px}
+}
 .result-details{margin-top:12px;border:1px dashed var(--border);border-radius:14px;padding:10px 12px;background:#fff}
 .result-details summary{cursor:pointer;font-weight:700;list-style:none;color:#111827}
 .result-details summary::-webkit-details-marker{display:none}

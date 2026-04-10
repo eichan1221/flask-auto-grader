@@ -368,7 +368,7 @@
           <h2 data-role="student">問題文を読んで解答する</h2>
           <button class="btn" id="btnExportGrading" data-role="teacher">🧾 grading.jsonl</button>
         </div>
-        <div class="flow-guide" id="flowGuide" aria-live="polite">問題を読む → 解答を書く → 採点する → コメントを見て書き直す</div>
+        <div class="flow-guide" id="flowGuide" aria-live="polite">解答する → 100点満点で評価 → 添削を読む → リライトして再提出（100点まで繰り返し）</div>
 
         <!-- ✅ 追加：採点の観点（折りたたみ可能） -->
         <div class="qcard" id="rubricCard" style="margin-top:10px;">
@@ -495,6 +495,7 @@
             <div class="summary-row">
               <div>
                 <div class="caps">今回の得点</div>
+                <div id="scoreLine100Main" class="score-main-100"></div>
                 <div id="scoreLine" class="success" style="font-weight:700;font-size:20px"></div>
                 <div id="scoreLine100" class="small" style="margin-top:4px"></div>
                 <div id="perfectBadge" class="perfect-badge" style="display:none">🎉満点おめでとう！</div>
@@ -519,6 +520,24 @@
                   <div id="nextActionText"></div>
                 </div>
               </div>
+            </div>
+            <div class="student-learning-panel" id="studentLearningPanel" style="display:none">
+              <div class="small muted">次のリライトに使う添削ポイント</div>
+              <div class="student-learning-grid">
+                <div>
+                  <div class="small muted">弱点</div>
+                  <ul id="weaknessPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+                </div>
+                <div>
+                  <div class="small muted">足りない点</div>
+                  <ul id="missingPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+                </div>
+                <div>
+                  <div class="small muted">記述の書き方ポイント</div>
+                  <ul id="writingPoints" style="margin:6px 0 0;padding-left:18px"></ul>
+                </div>
+              </div>
+              <div id="rewritePrompt" class="small" style="margin-top:8px"></div>
             </div>
             <div class="summary-continue" id="continueScoreCard">
               <div class="small muted">続けたい度（0〜10）</div>
@@ -1153,6 +1172,7 @@
       if(gr) gr.style.display = 'none';
 
       const scoreLine = $('#scoreLine'); if(scoreLine) scoreLine.textContent = '';
+      const scoreLine100Main = $('#scoreLine100Main'); if(scoreLine100Main) scoreLine100Main.textContent = '';
       const scoreLine100 = $('#scoreLine100'); if(scoreLine100) scoreLine100.textContent = '';
       const perfectBadge = $('#perfectBadge'); if(perfectBadge) perfectBadge.style.display = 'none';
       const encouragementMessage = $('#encouragementMessage'); if(encouragementMessage){ encouragementMessage.textContent = ''; encouragementMessage.style.display = 'none'; }
@@ -1181,6 +1201,11 @@
       const gradedIntention = $('#gradedIntention'); if(gradedIntention) gradedIntention.textContent = '';
       const reasons = $('#reasons'); if(reasons) reasons.innerHTML = '';
       const attemptLabel = $('#attemptLabel'); if(attemptLabel) attemptLabel.textContent = '';
+      const studentLearningPanel = $('#studentLearningPanel'); if(studentLearningPanel) studentLearningPanel.style.display = 'none';
+      const weaknessPoints = $('#weaknessPoints'); if(weaknessPoints) weaknessPoints.innerHTML = '';
+      const missingPoints = $('#missingPoints'); if(missingPoints) missingPoints.innerHTML = '';
+      const writingPoints = $('#writingPoints'); if(writingPoints) writingPoints.innerHTML = '';
+      const rewritePrompt = $('#rewritePrompt'); if(rewritePrompt) rewritePrompt.textContent = '';
 
       const weakWrap = $('#weakTagsWrap'); if(weakWrap) weakWrap.style.display = 'none';
       const weakTags = $('#weakTags'); if(weakTags) weakTags.innerHTML = '';
@@ -2429,6 +2454,10 @@
       const score100 = safeScoreValue(r?.score_100 ?? ((maxScore > 0) ? (score / maxScore) * 100 : 0), 0);
       const label = r?.score_label || `${maxScore}点`;
       const isPerfect = Boolean(r?.is_perfect_score) || (score >= maxScore);
+      const scoreLine100Main = $('#scoreLine100Main');
+      if(scoreLine100Main){
+        scoreLine100Main.textContent = `${Math.round(score100)} / 100`;
+      }
       $('#scoreLine').textContent = isPerfect ? `満点（${label}中${score}点）` : `${label}中${score}点`;
       const scoreLine100 = $('#scoreLine100');
       if(scoreLine100){
@@ -2447,6 +2476,25 @@
       if(attemptLabel){
         const attempt = Number(r?.rewrite_count ?? 0);
         attemptLabel.textContent = attempt > 0 ? `リライト ${attempt} 回目` : '初回提出';
+      }
+      const studentLearningPanel = $('#studentLearningPanel');
+      const weaknessPoints = $('#weaknessPoints');
+      const missingPoints = $('#missingPoints');
+      const writingPoints = $('#writingPoints');
+      const rewritePrompt = $('#rewritePrompt');
+      if(studentLearningPanel && weaknessPoints && missingPoints && writingPoints && rewritePrompt){
+        const weakList = Array.isArray(r?.weakness_points) ? r.weakness_points : [];
+        const missingList = Array.isArray(r?.missing_points) ? r.missing_points : [];
+        const writingList = Array.isArray(r?.writing_points) ? r.writing_points : [];
+        weaknessPoints.innerHTML = '';
+        missingPoints.innerHTML = '';
+        writingPoints.innerHTML = '';
+        weakList.forEach(t=>{ const li = document.createElement('li'); li.textContent = t; weaknessPoints.appendChild(li); });
+        missingList.forEach(t=>{ const li = document.createElement('li'); li.textContent = t; missingPoints.appendChild(li); });
+        writingList.forEach(t=>{ const li = document.createElement('li'); li.textContent = t; writingPoints.appendChild(li); });
+        rewritePrompt.textContent = (r?.rewrite_prompt || '').trim();
+        const hasAny = weakList.length || missingList.length || writingList.length || rewritePrompt.textContent;
+        studentLearningPanel.style.display = hasAny ? '' : 'none';
       }
 
       const gp = $('#goodPoints'); gp.innerHTML = '';
